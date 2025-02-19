@@ -86,6 +86,9 @@ public class Generator3D : MonoBehaviour {
 
     [ExecuteAlways]
     public void Generate() {
+        System.Diagnostics.Stopwatch stopwatch = new System.Diagnostics.Stopwatch();
+        stopwatch.Start();
+
         Clear();  // 기존 던전 데이터 초기화
 
         random = new Random(System.DateTime.Now.Millisecond);  // 현재 시간 기반 랜덤 시드
@@ -96,6 +99,11 @@ public class Generator3D : MonoBehaviour {
         Triangulate();       // 삼각분할
         CreateHallways();    // 복도 생성
         PathfindHallways();  // 경로 탐색 및 계단 배치
+
+        stopwatch.Stop();
+
+        if (Application.isPlaying == false)
+            Debug.Log($"던전 생성 완료: {stopwatch.ElapsedMilliseconds / 1000.0f}ms");
     }
 
     [ExecuteAlways]
@@ -273,6 +281,19 @@ public class Generator3D : MonoBehaviour {
                     Debug.LogError($"여전히 연결되지 않은 방이 있습니다: {unconnectedRooms.Count}개");
                     foreach (var room in unconnectedRooms) {
                         Debug.LogError($"연결되지 않은 방 위치: {room.bounds.position}");
+                    }
+                }
+            }
+
+            // 모든 방이 연결된 후 순환 경로 추가
+            if (edges.Count > 0) {
+                // 12.5% 확률로 추가 간선 선택 (순환 경로 생성)
+                var remainingEdges = new HashSet<Prim.Edge>(edges);
+                remainingEdges.ExceptWith(selectedEdges);
+
+                foreach (var edge in remainingEdges) {
+                    if (random.NextDouble() < 0.125) {
+                        selectedEdges.Add(edge);
                     }
                 }
             }
