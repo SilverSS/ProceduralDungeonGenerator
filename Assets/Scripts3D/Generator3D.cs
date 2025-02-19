@@ -403,6 +403,13 @@ public class Generator3D : MonoBehaviour {
                         }
                     }
                 }
+
+                // 복도 시각화
+                foreach (var pos in path) {
+                    if (grid[pos] == CellType.Hallway) {
+                        PlaceHallway(pos);
+                    }
+                }
             }
         }
     }
