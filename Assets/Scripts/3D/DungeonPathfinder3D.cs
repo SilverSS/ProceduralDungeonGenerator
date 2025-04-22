@@ -2,35 +2,52 @@
 using System.Collections.Generic;
 using UnityEngine;
 using BlueRaja;
+using System.Linq;
 
 /// <summary>
 /// 3D 던전 경로 탐색기 클래스
 /// 계단 배치를 위한 수정된 A* 알고리즘 구현
 /// </summary>
 public class DungeonPathfinder3D {
-    // 노드 클래스 정의 - 경로 탐색에 사용되는 기본 단위
+    /// <summary>
+    /// 경로 탐색에 사용되는 노드 클래스
+    /// </summary>
     public class Node {
         public Vector3Int Position { get; private set; }    // 노드의 3D 위치
         public Node Previous { get; set; }                  // 이전 노드 참조
-        public HashSet<Vector3Int> PreviousSet { get; private set; }  // 이전 위치들의 집합 (계단 생성 시 사용)
+        public HashSet<Vector3Int> PreviousSet { get; set; }  // 이전 위치들의 집합 (계단 생성 시 사용)
         public float Cost { get; set; }                     // 시작점에서 현재까지의 누적 비용
+        public float Heuristic { get; set; }                // 휴리스틱 함수 값
+        public bool IsRoom { get; set; }                    // 해당 위치가 방인지 여부
+        public bool IsCorridor { get; set; }                // 해당 위치가 복도인지 여부
 
-        // 노드 생성자 - 위치 초기화 및 이전 위치 집합 생성
+        /// <summary>
+        /// 노드 생성자
+        /// </summary>
+        /// <param name="position">노드의 3D 위치</param>
         public Node(Vector3Int position) {
             Position = position;
             PreviousSet = new HashSet<Vector3Int>();
+            IsRoom = false;
+            IsCorridor = false;
         }
     }
 
-    // 경로 비용 구조체 - 이동 가능 여부와 비용을 포함
+    /// <summary>
+    /// 경로 비용 정보를 담는 구조체
+    /// </summary>
     public struct PathCost {
         public bool traversable;    // 해당 위치로 이동 가능 여부
         public float cost;          // 이동에 필요한 비용
         public bool isStairs;       // 계단 설치 가능 여부
+        public bool isRoom;         // 해당 위치가 방인지 여부
+        public bool isCorridor;     // 해당 위치가 복도인지 여부
     }
 
-    // 이웃 노드들의 상대적 위치 정의
-    // 기본 이동(동서남북)과 계단 이동(상하) 모두 포함
+    /// <summary>
+    /// 이웃 노드들의 상대적 위치 정의
+    /// 기본 이동(동서남북)과 계단 이동(상하) 모두 포함
+    /// </summary>
     static readonly Vector3Int[] neighbors = {
         // 기본 이동 방향
         new Vector3Int(1, 0, 0),   // 동
@@ -53,9 +70,9 @@ public class DungeonPathfinder3D {
 
     // 경로 탐색에 필요한 데이터 구조들
     private Grid3D<Node> grid;                              // 3D 공간의 모든 노드를 저장하는 그리드
-    private SimplePriorityQueue<Node, float> queue;         // A* 알고리즘용 우선순위 큐
+    private PriorityQueue queue;                            // 최적화된 우선순위 큐
     private HashSet<Node> closed;                           // 이미 방문한 노드들의 집합
-    private Stack<Vector3Int> stack;                        // 경로 재구성을 위한 스택
+    private Vector3Int endPos;                              // 목표 위치
 
     /// <summary>
     /// 경로 탐색기 생성자
@@ -63,11 +80,10 @@ public class DungeonPathfinder3D {
     /// <param name="size">던전의 3차원 크기</param>
     public DungeonPathfinder3D(Vector3Int size) {
         grid = new Grid3D<Node>(size, Vector3Int.zero);
-        queue = new SimplePriorityQueue<Node, float>();
+        queue = new PriorityQueue();
         closed = new HashSet<Node>();
-        stack = new Stack<Vector3Int>();
 
-        // 모든 위치에 대해 노드 초기화
+        // 필요한 노드만 동적으로 생성
         for (int z = 0; z < size.z; z++) {
             for (int y = 0; y < size.y; y++) {
                 for (int x = 0; x < size.x; x++) {
@@ -81,10 +97,11 @@ public class DungeonPathfinder3D {
     /// <summary>
     /// 모든 노드의 상태를 초기화
     /// </summary>
-    void ResetNodes() {
+    private void ResetNodes() {
         queue.Clear();
         closed.Clear();
         
+        // 모든 노드 초기화
         for (int z = 0; z < grid.Size.z; z++) {
             for (int y = 0; y < grid.Size.y; y++) {
                 for (int x = 0; x < grid.Size.x; x++) {
@@ -98,6 +115,21 @@ public class DungeonPathfinder3D {
     }
 
     /// <summary>
+    /// 휴리스틱 함수 최적화
+    /// 대각선 이동을 고려한 유클리드 거리 + 높이 차이 가중치 사용
+    /// </summary>
+    /// <param name="current">현재 위치</param>
+    /// <param name="end">목표 위치</param>
+    /// <returns>휴리스틱 값</returns>
+    private float CalculateHeuristic(Vector3Int current, Vector3Int end) {
+        // 대각선 이동을 고려한 유클리드 거리 + 높이 차이 가중치
+        float dx = Mathf.Abs(current.x - end.x);
+        float dy = Mathf.Abs(current.y - end.y) * 2.0f; // 높이 차이에 2배 가중치
+        float dz = Mathf.Abs(current.z - end.z);
+        return Mathf.Sqrt(dx * dx + dz * dz) + dy;
+    }
+
+    /// <summary>
     /// 시작점에서 목표점까지의 경로를 찾는 메서드
     /// </summary>
     /// <param name="start">시작 위치</param>
@@ -105,118 +137,241 @@ public class DungeonPathfinder3D {
     /// <param name="costFunction">노드 간 이동 비용을 계산하는 함수</param>
     /// <returns>경로를 이루는 위치들의 리스트</returns>
     public List<Vector3Int> FindPath(Vector3Int start, Vector3Int end, Func<Node, Node, PathCost> costFunction) {
-        ResetNodes();  // 노드 상태 초기화
+        ResetNodes();
+        endPos = end;
         
         Node startNode = grid[start];
         startNode.Cost = 0;
-        queue.Enqueue(startNode, 0);
+        startNode.Heuristic = CalculateHeuristic(start, end);
+        queue.Enqueue(startNode, startNode.Heuristic);
 
         while (queue.Count > 0) {
             Node node = queue.Dequeue();
 
-            // 목표 도달 시 경로 반환
             if (node.Position == end) {
-                stack.Clear();
-                
-                // 경로 재구성
-                Node current = node;
-                while (current != null) {
-                    stack.Push(current.Position);
-                    current = current.Previous;
-                }
-                
-                return new List<Vector3Int>(stack);
+                return ReconstructPath(node);
             }
 
-            foreach (var offset in neighbors) {
-                // 이웃 노드가 그리드 범위를 벗어나면 건너뛰기
-                if (!grid.InBounds(node.Position + offset)) continue;
-                var neighbor = grid[node.Position + offset];
-                // 이미 방문한 노드면 건너뛰기
+            if (closed.Contains(node)) continue;
+            closed.Add(node);
+
+            // 방향성 있는 노드 검색 최적화
+            Vector3 direction = (end - node.Position).ToVector3();
+            var sortedNeighbors = neighbors.OrderBy(n => 
+                Vector3.Dot(n.ToVector3(), direction.normalized)).ToList();
+
+            foreach (var offset in sortedNeighbors) {
+                Vector3Int nextPos = node.Position + offset;
+                
+                if (!grid.InBounds(nextPos)) continue;
+                
+                Node neighbor = grid[nextPos];
                 if (closed.Contains(neighbor)) continue;
 
-                // 이전에 방문한 위치면 순환 경로 방지를 위해 건너뛰기
                 if (node.PreviousSet.Contains(neighbor.Position)) {
                     continue;
                 }
 
-                // 이웃 노드로의 이동 비용 계산
                 var pathCost = costFunction(node, neighbor);
-                // 이동 불가능한 위치면 건너뛰기
+                
+                // 방과 복도의 겹침에 대한 추가 비용 계산
+                float additionalCost = 0f;
+                
+                // 방에서 복도로 이동하거나 복도에서 방으로 이동하는 경우
+                if ((pathCost.isRoom && node.IsCorridor) || (pathCost.isCorridor && node.IsRoom)) {
+                    // 높은 추가 비용 부여 (기본 비용의 2배)
+                    additionalCost = pathCost.cost * 2f;
+                }
+                
                 if (!pathCost.traversable) continue;
 
-                // 계단을 설치하는 경우
-                if (pathCost.isStairs) {
-                    // 계단의 방향 벡터 계산
-                    int xDir = Mathf.Clamp(offset.x, -1, 1);
-                    int zDir = Mathf.Clamp(offset.z, -1, 1);
-                    Vector3Int verticalOffset = new Vector3Int(0, offset.y, 0);    // 수직 이동량
-                    Vector3Int horizontalOffset = new Vector3Int(xDir, 0, zDir);   // 수평 이동량
-
-                    // 계단 설치에 필요한 공간이 이미 사용 중이면 건너뛰기
-                    if (node.PreviousSet.Contains(node.Position + horizontalOffset)
-                        || node.PreviousSet.Contains(node.Position + horizontalOffset * 2)
-                        || node.PreviousSet.Contains(node.Position + verticalOffset + horizontalOffset)
-                        || node.PreviousSet.Contains(node.Position + verticalOffset + horizontalOffset * 2)) {
-                        continue;
-                    }
-                }
-
-                // 새로운 경로 비용 계산
-                float newCost = node.Cost + pathCost.cost;
-
-                // 더 낮은 비용의 경로를 발견한 경우
-                if (newCost < neighbor.Cost) {
-                    neighbor.Previous = node;
+                float newCost = node.Cost + pathCost.cost + additionalCost;
+                
+                if (!queue.Contains(neighbor) || newCost < neighbor.Cost) {
                     neighbor.Cost = newCost;
-
-                    // 우선순위 큐 업데이트
-                    if (queue.TryGetPriority(node, out float existingPriority)) {
-                        queue.UpdatePriority(node, newCost);
-                    } else {
-                        queue.Enqueue(neighbor, neighbor.Cost);
-                    }
-
-                    // 이전 방문 위치 집합 업데이트
-                    neighbor.PreviousSet.Clear();
-                    neighbor.PreviousSet.UnionWith(node.PreviousSet);
+                    neighbor.Heuristic = CalculateHeuristic(nextPos, end);
+                    neighbor.Previous = node;
+                    neighbor.PreviousSet = new HashSet<Vector3Int>(node.PreviousSet);
                     neighbor.PreviousSet.Add(node.Position);
-
-                    // 계단인 경우 추가 공간 예약
-                    if (pathCost.isStairs){
-                        int xDir = Mathf.Clamp(offset.x, -1, 1);
-                        int zDir = Mathf.Clamp(offset.z, -1, 1);
-                        Vector3Int verticalOffset = new Vector3Int(0, offset.y, 0);
-                        Vector3Int horizontalOffset = new Vector3Int(xDir, 0, zDir);
-
-                        // 계단 설치에 필요한 모든 위치를 이전 방문 집합에 추가
-                        neighbor.PreviousSet.Add(node.Position + horizontalOffset);
-                        neighbor.PreviousSet.Add(node.Position + horizontalOffset * 2);
-                        neighbor.PreviousSet.Add(node.Position + verticalOffset + horizontalOffset);
-                        neighbor.PreviousSet.Add(node.Position + verticalOffset + horizontalOffset * 2);
+                    neighbor.IsRoom = pathCost.isRoom;
+                    neighbor.IsCorridor = pathCost.isCorridor;
+                    
+                    if (queue.Contains(neighbor)) {
+                        queue.UpdatePriority(neighbor, newCost + neighbor.Heuristic);
+                    } else {
+                        queue.Enqueue(neighbor, newCost + neighbor.Heuristic);
                     }
                 }
             }
         }
 
-        return null;  // 경로를 찾지 못한 경우
+        return null;
     }
 
-    // 경로 재구성 메서드 - 목표 노드에서 시작 노드까지의 경로를 역추적
-    List<Vector3Int> ReconstructPath(Node node) {
-        List<Vector3Int> result = new List<Vector3Int>();
+    /// <summary>
+    /// 경로 재구성 최적화
+    /// 경로 길이를 미리 계산하여 리스트 크기 할당
+    /// </summary>
+    /// <param name="end">목표 노드</param>
+    /// <returns>경로를 이루는 위치들의 리스트</returns>
+    private List<Vector3Int> ReconstructPath(Node end) {
+        // 경로 길이 계산
+        int length = 0;
+        Node current = end;
+        while (current != null) {
+            length++;
+            current = current.Previous;
+        }
+        
+        // 미리 크기 할당
+        var path = new List<Vector3Int>(length);
+        current = end;
+        while (current != null) {
+            path.Add(current.Position);
+            current = current.Previous;
+        }
+        path.Reverse(); // 마지막에 한 번만 뒤집기
+        return path;
+    }
 
-        // 목표 노드에서 시작 노드까지 역순으로 스택에 저장
-        while (node != null) {
-            stack.Push(node.Position);
-            node = node.Previous;
+    /// <summary>
+    /// 최적화된 우선순위 큐 구현
+    /// 이진 힙을 사용한 효율적인 우선순위 큐
+    /// </summary>
+    private class PriorityQueue {
+        private List<(Node, float)> items = new List<(Node, float)>();      // (노드, 우선순위) 쌍을 저장하는 리스트
+        private Dictionary<Node, int> nodeIndices = new Dictionary<Node, int>();  // 노드의 인덱스를 저장하는 딕셔너리
+
+        public int Count => items.Count;  // 큐의 크기
+
+        /// <summary>
+        /// 큐 초기화
+        /// </summary>
+        public void Clear() {
+            items.Clear();
+            nodeIndices.Clear();
         }
 
-        // 스택에서 꺼내며 올바른 순서로 경로 생성
-        while (stack.Count > 0) {
-            result.Add(stack.Pop());
+        /// <summary>
+        /// 노드가 큐에 있는지 확인
+        /// </summary>
+        public bool Contains(Node node) {
+            return nodeIndices.ContainsKey(node);
         }
 
-        return result;
+        /// <summary>
+        /// 노드를 큐에 추가
+        /// </summary>
+        public void Enqueue(Node node, float priority) {
+            items.Add((node, priority));
+            int i = items.Count - 1;
+            nodeIndices[node] = i;
+            HeapifyUp(i);
+        }
+
+        /// <summary>
+        /// 우선순위가 가장 높은 노드를 큐에서 제거하고 반환
+        /// </summary>
+        public Node Dequeue() {
+            if (items.Count == 0) throw new InvalidOperationException("Queue is empty");
+            
+            var result = items[0].Item1;
+            nodeIndices.Remove(result);
+            
+            if (items.Count > 1) {
+                items[0] = items[items.Count - 1];
+                nodeIndices[items[0].Item1] = 0;
+            }
+            
+            items.RemoveAt(items.Count - 1);
+            
+            if (items.Count > 0) {
+                HeapifyDown(0);
+            }
+            
+            return result;
+        }
+
+        /// <summary>
+        /// 노드의 우선순위 업데이트
+        /// </summary>
+        public void UpdatePriority(Node node, float newPriority) {
+            if (!nodeIndices.TryGetValue(node, out int index)) {
+                throw new InvalidOperationException("Node not found in queue");
+            }
+            
+            float oldPriority = items[index].Item2;
+            items[index] = (node, newPriority);
+            
+            if (newPriority < oldPriority) {
+                HeapifyUp(index);
+            } else {
+                HeapifyDown(index);
+            }
+        }
+
+        /// <summary>
+        /// 힙 속성 유지를 위한 상향 이동
+        /// </summary>
+        private void HeapifyUp(int i) {
+            while (i > 0) {
+                int parent = (i - 1) / 2;
+                if (items[parent].Item2 <= items[i].Item2) break;
+                
+                Swap(i, parent);
+                i = parent;
+            }
+        }
+
+        /// <summary>
+        /// 힙 속성 유지를 위한 하향 이동
+        /// </summary>
+        private void HeapifyDown(int i) {
+            while (true) {
+                int left = 2 * i + 1;
+                int right = 2 * i + 2;
+                int smallest = i;
+                
+                if (left < items.Count && items[left].Item2 < items[smallest].Item2) {
+                    smallest = left;
+                }
+                
+                if (right < items.Count && items[right].Item2 < items[smallest].Item2) {
+                    smallest = right;
+                }
+                
+                if (smallest == i) break;
+                
+                Swap(i, smallest);
+                i = smallest;
+            }
+        }
+
+        /// <summary>
+        /// 두 노드의 위치 교환
+        /// </summary>
+        private void Swap(int i, int j) {
+            var temp = items[i];
+            items[i] = items[j];
+            items[j] = temp;
+            
+            nodeIndices[items[i].Item1] = i;
+            nodeIndices[items[j].Item1] = j;
+        }
+    }
+}
+
+/// <summary>
+/// Vector3Int 확장 메서드
+/// Vector3Int를 Vector3로 변환하는 기능 제공
+/// </summary>
+public static class Vector3IntExtensions {
+    /// <summary>
+    /// Vector3Int를 Vector3로 변환
+    /// </summary>
+    /// <param name="v">변환할 Vector3Int</param>
+    /// <returns>변환된 Vector3</returns>
+    public static Vector3 ToVector3(this Vector3Int v) {
+        return new Vector3(v.x, v.y, v.z);
     }
 }

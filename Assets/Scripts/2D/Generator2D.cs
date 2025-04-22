@@ -69,6 +69,9 @@ public class Generator2D : MonoBehaviour {
 
     [ExecuteAlways]
     public void Generate() {
+        System.Diagnostics.Stopwatch stopwatch = new System.Diagnostics.Stopwatch();
+        stopwatch.Start();
+
         Clear();
         
         random = new Random(System.DateTime.Now.Millisecond);
@@ -82,6 +85,14 @@ public class Generator2D : MonoBehaviour {
         Triangulate();
         CreateHallways();
         PathfindHallways();
+
+        stopwatch.Stop();
+
+        if (Application.isPlaying == false)
+        {
+            string time = stopwatch.ElapsedMilliseconds / 1000.0f < 1 ? $"{stopwatch.ElapsedMilliseconds}ms" : $"{stopwatch.ElapsedMilliseconds / 1000.0f}s";
+            Debug.Log($"던전 생성 완료: {time}");
+        }
     }
 
     [ExecuteAlways]
