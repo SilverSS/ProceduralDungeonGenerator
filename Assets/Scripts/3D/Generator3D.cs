@@ -56,6 +56,15 @@ public class Generator3D : MonoBehaviour {
     [SerializeField]
     Material stairMaterial;     // 계단을 표시할 초록색 재질
 
+    // 카테고리 오브젝트
+    private GameObject roomsCategory;
+    private GameObject pathsCategory;
+    private GameObject tempParent;  // 임시 부모 오브젝트
+    private int roomCounter = 0;
+    private Dictionary<Vector3Int, GameObject> stairGroups = new Dictionary<Vector3Int, GameObject>();
+    private Dictionary<int, GameObject> pathGroups = new Dictionary<int, GameObject>();
+    private Dictionary<Vector3Int, int> positionToPathIndex = new Dictionary<Vector3Int, int>();
+
     [SerializeField] [HideInInspector]
     Grid3D<CellType> grid;      // 3D 그리드
     [SerializeField] [HideInInspector] 
@@ -72,11 +81,63 @@ public class Generator3D : MonoBehaviour {
     Random random;            // 난수 생성기
     Delaunay3D delaunay;     // 3D 들로네 삼각분할
 
+    [Header("Random Generation Options")]
+    [SerializeField] private bool useRandomSeed = true;  // 랜덤 시드 사용 여부
+    [SerializeField] private int seed = 0;               // 고정 시드 값
+
     [Header("Visualization Options")]
     [SerializeField] private bool showMSTEdges = true;    // MST 간선 표시 여부
-    [SerializeField] private bool showPathLines = true;    // 실제 통로 경로 표시 여부
     [SerializeField] private Color mstColor = Color.blue;  // MST 간선 색상
     [SerializeField] private Color pathColor = Color.yellow;  // 통로 경로 색상
+
+    // Node 클래스에 방향 정보 추가
+    public class Node {
+        public Vector3Int Position { get; set; }
+        public List<PathDirection> OpenDirections { get; set; }  // 열린 방향 목록
+        public bool IsStair { get; set; }                        // 계단 여부
+        public int PathIndex { get; set; }                       // 속한 경로의 인덱스
+
+        public Node(Vector3Int position) {
+            Position = position;
+            OpenDirections = new List<PathDirection>();
+            IsStair = false;
+            PathIndex = -1;
+        }
+    }
+
+    // 방향 정보를 나타내는 열거형
+    public enum PathDirection {
+        None,       // 방향 없음
+        XPlus,      // X축 양의 방향
+        XMinus,     // X축 음의 방향
+        ZPlus,      // Z축 양의 방향
+        ZMinus      // Z축 음의 방향
+    }
+
+    // 두 위치 간의 방향을 계산하는 메서드
+    private PathDirection GetDirection(Vector3Int from, Vector3Int to) {
+        Vector3Int delta = to - from;
+        
+        if (delta.x > 0) return PathDirection.XPlus;
+        if (delta.x < 0) return PathDirection.XMinus;
+        if (delta.z > 0) return PathDirection.ZPlus;
+        if (delta.z < 0) return PathDirection.ZMinus;
+        
+        return PathDirection.None;
+    }
+
+    // 반대 방향을 구하는 헬퍼 메서드
+    private PathDirection GetOppositeDirection(PathDirection direction) {
+        switch (direction) {
+            case PathDirection.XPlus: return PathDirection.XMinus;
+            case PathDirection.XMinus: return PathDirection.XPlus;
+            case PathDirection.ZPlus: return PathDirection.ZMinus;
+            case PathDirection.ZMinus: return PathDirection.ZPlus;
+            default: return PathDirection.None;
+        }
+    }
+
+    private Dictionary<Vector3Int, Node> nodes;  // 노드 정보를 저장할 딕셔너리
 
     // 게임 시작 시 호출되는 메서드
     void Start() {
@@ -90,15 +151,30 @@ public class Generator3D : MonoBehaviour {
         stopwatch.Start();
 
         Clear();  // 기존 던전 데이터 초기화
+        CreateCategoryObjects();  // 카테고리 오브젝트 생성
 
-        random = new Random(System.DateTime.Now.Millisecond);  // 현재 시간 기반 랜덤 시드
+        // 시드 설정
+        if (useRandomSeed) {
+            seed = System.DateTime.Now.Millisecond;
+        }
+        random = new Random(seed);
+        Debug.Log($"던전 생성 시드: {seed}");
+
         grid = new Grid3D<CellType>(size, Vector3Int.zero);   // 3D 그리드 초기화
         rooms = new List<Room>();                             // 방 목록 초기화
+        nodes = new Dictionary<Vector3Int, Node>();           // 노드 정보 초기화
 
         PlaceRooms();        // 방 배치
         Triangulate();       // 삼각분할
         CreateHallways();    // 복도 생성
         PathfindHallways();  // 경로 탐색 및 계단 배치
+        OrganizeHallways();  // 복도 그룹화
+        OrganizeStairs();    // 계단 그룹화 및 이름 변경
+
+        // 임시 부모 오브젝트 제거
+        if (tempParent != null) {
+            DestroyImmediate(tempParent);
+        }
 
         stopwatch.Stop();
 
@@ -108,18 +184,46 @@ public class Generator3D : MonoBehaviour {
 
     [ExecuteAlways]
     public void Clear() {
+        Debug.Log("던전 데이터 초기화 시작");
+        
         // 모든 자식 오브젝트 제거
         while (transform.childCount > 0) {
             DestroyImmediate(transform.GetChild(0).gameObject);
         }
 
+        // 카테고리 카운터 초기화
+        roomCounter = 0;
+
+        // 딕셔너리 초기화
+        stairGroups.Clear();
+        pathGroups.Clear();
+        positionToPathIndex.Clear();
+
         // 기존 데이터 초기화
+        if (nodes != null) {
+            nodes.Clear();
+            Debug.Log("노드 데이터 초기화 완료");
+        }
         if (grid != null) grid = null;
         if (rooms != null) rooms.Clear();
         if (delaunay != null) delaunay = null;
         if (selectedEdges != null) selectedEdges.Clear();
         if (connectedRooms != null) connectedRooms.Clear();
         if (pathLines != null) pathLines.Clear();
+
+        Debug.Log("던전 데이터 초기화 완료");
+    }
+
+    // 카테고리 오브젝트 생성
+    private void CreateCategoryObjects() {
+        roomsCategory = new GameObject("Rooms");
+        roomsCategory.transform.SetParent(transform);
+        
+        pathsCategory = new GameObject("Paths");
+        pathsCategory.transform.SetParent(transform);
+
+        tempParent = new GameObject("Temp");
+        tempParent.transform.SetParent(transform);
     }
 
     // 3D 방 배치 메서드
@@ -287,12 +391,12 @@ public class Generator3D : MonoBehaviour {
 
             // 모든 방이 연결된 후 순환 경로 추가
             if (edges.Count > 0) {
-                // 12.5% 확률로 추가 간선 선택 (순환 경로 생성)
+                // 5% 확률로 추가 간선 선택 (순환 경로 생성)
                 var remainingEdges = new HashSet<Prim.Edge>(edges);
                 remainingEdges.ExceptWith(selectedEdges);
 
                 foreach (var edge in remainingEdges) {
-                    if (random.NextDouble() < 0.125) {
+                    if (random.NextDouble() < 0.05) {
                         selectedEdges.Add(edge);
                     }
                 }
@@ -306,6 +410,7 @@ public class Generator3D : MonoBehaviour {
     // A* 경로 탐색과 복도/계단 생성 메서드
     void PathfindHallways() {
         DungeonPathfinder3D aStar = new DungeonPathfinder3D(size);
+        int currentPathIndex = 0;
 
         foreach (var edge in selectedEdges) {
             var startRoom = (edge.U as Vertex<Room>).Item;
@@ -315,32 +420,27 @@ public class Generator3D : MonoBehaviour {
             var startLowestY = startRoom.bounds.yMin;
             var endLowestY = endRoom.bounds.yMin;
 
-            // 시작점 설정 (x,z는 중심, y는 최저점)
-            var startPos = new Vector3Int(
-                (int)startRoom.bounds.center.x,
-                startLowestY,
-                (int)startRoom.bounds.center.z
-            );
+            // 시작점과 도착점을 방의 가장자리까지 확장
+            var startPos = GetRoomEdgePosition(startRoom, endRoom, true);
+            var endPos = GetRoomEdgePosition(endRoom, startRoom, false);
 
-            // 도착점 설정 (x,z는 중심, y는 최저점)
-            var endPos = new Vector3Int(
-                (int)endRoom.bounds.center.x,
-                endLowestY,
-                (int)endRoom.bounds.center.z
-            );
+            Debug.Log($"경로 탐색 시작: 시작점 [{startPos.x},{startPos.y},{startPos.z}] -> 끝점 [{endPos.x},{endPos.y},{endPos.z}]");
 
             var path = aStar.FindPath(startPos, endPos, (DungeonPathfinder3D.Node a, DungeonPathfinder3D.Node b) => {
                 var pathCost = new DungeonPathfinder3D.PathCost();
                 var delta = b.Position - a.Position;
+
+                // 계단 영역을 통과할 수 없도록 설정
+                if (grid[b.Position] == CellType.Stairs) {
+                    return pathCost;  // 계단은 통과 불가
+                }
 
                 if (delta.y == 0) {
                     // 평평한 복도의 경우
                     pathCost.cost = Vector3Int.Distance(b.Position, endPos);    // 목표까지의 거리를 휴리스틱으로 사용
 
                     // 셀 타입에 따른 이동 비용 설정
-                    if (grid[b.Position] == CellType.Stairs) {
-                        return pathCost;  // 계단은 통과 불가
-                    } else if (grid[b.Position] == CellType.Room) {
+                    if (grid[b.Position] == CellType.Room) {
                         pathCost.cost += 5;  // 방을 통과하는 비용
                     } else if (grid[b.Position] == CellType.None) {
                         pathCost.cost += 1;  // 빈 공간을 통과하는 비용
@@ -385,42 +485,94 @@ public class Generator3D : MonoBehaviour {
                 return pathCost;
             });
 
-            // 경로가 존재하는 경우 복도와 계단 생성
-            if (path != null) {
+            // 경로가 존재하는 경우에만 처리
+            if (path != null && path.Count > 0) {
+                Debug.Log($"경로 발견: {path.Count}개의 노드");
+
+                // 목표 방의 외곽에 처음 닿는 지점을 찾아 경로를 자릅니다
+                int endIndex = path.Count;
+                for (int i = 0; i < path.Count; i++) {
+                    var pos = path[i];
+                    // 현재 위치가 목표 방 안에 있는지 확인
+                    if (endRoom.bounds.Contains(pos)) {
+                        // 현재 위치(외곽)까지 포함
+                        endIndex = i + 1;
+                        break;
+                    }
+                }
+
+                // 경로를 외곽 지점까지 사용
+                path = path.GetRange(0, endIndex);
+                
                 // 경로 저장
                 pathLines.Add(new List<Vector3Int>(path));
 
-                // 각 경로 지점에 대해 처리
+                // 먼저 모든 위치를 복도로 표시
+                foreach (var pos in path) {
+                    if (grid[pos] == CellType.None) {
+                        grid[pos] = CellType.Hallway;
+                    }
+                }
+
+                // 그 다음 계단 설치
+                for (int i = 1; i < path.Count; i++) {
+                    var prev = path[i - 1];
+                    var current = path[i];
+                    var delta = current - prev;
+
+                    // 높이 차이가 있는 경우 계단 설치
+                    if (delta.y != 0) {
+                        int xDir = Mathf.Clamp(delta.x, -1, 1);
+                        int zDir = Mathf.Clamp(delta.z, -1, 1);
+                        Vector3Int verticalOffset = new Vector3Int(0, delta.y, 0);
+                        Vector3Int horizontalOffset = new Vector3Int(xDir, 0, zDir);
+                        
+                        // 계단 영역 설정
+                        Vector3Int[] stairPositions = {
+                            prev + horizontalOffset,
+                            prev + horizontalOffset * 2,
+                            prev + verticalOffset + horizontalOffset,
+                            prev + verticalOffset + horizontalOffset * 2
+                        };
+
+                        // 계단 영역을 그리드에 표시
+                        foreach (var pos in stairPositions) {
+                            grid[pos] = CellType.Stairs;
+                            positionToPathIndex[pos] = currentPathIndex;
+                        }
+
+                        // 계단 시각화 오브젝트 생성
+                        PlaceStairs(stairPositions);
+                    }
+                }
+
+                // 마지막으로 노드 정보 생성 및 방향 설정
                 for (int i = 0; i < path.Count; i++) {
                     var current = path[i];
+                    positionToPathIndex[current] = currentPathIndex;
 
-                    // 빈 공간을 복도로 변경
-                    if (grid[current] == CellType.None) {
-                        grid[current] = CellType.Hallway;
+                    // 노드 정보 가져오기 또는 생성
+                    if (!nodes.TryGetValue(current, out Node node)) {
+                        node = new Node(current);
+                        nodes[current] = node;
                     }
 
-                    // 이전 위치와 현재 위치 사이에 계단 설치가 필요한지 확인
+                    // 이전 노드와의 방향 설정
                     if (i > 0) {
                         var prev = path[i - 1];
-                        var delta = current - prev;
+                        var direction = GetDirection(prev, current);
+                        var oppositeDirection = GetOppositeDirection(direction);
+                        if (!node.OpenDirections.Contains(oppositeDirection)) {
+                            node.OpenDirections.Add(oppositeDirection);
+                        }
+                    }
 
-                        // 높이 차이가 있는 경우 계단 설치
-                        if (delta.y != 0) {
-                            int xDir = Mathf.Clamp(delta.x, -1, 1);
-                            int zDir = Mathf.Clamp(delta.z, -1, 1);
-                            Vector3Int verticalOffset = new Vector3Int(0, delta.y, 0);
-                            Vector3Int horizontalOffset = new Vector3Int(xDir, 0, zDir);
-                            
-                            // 계단 영역 설정 및 시각화
-                            grid[prev + horizontalOffset] = CellType.Stairs;
-                            grid[prev + horizontalOffset * 2] = CellType.Stairs;
-                            grid[prev + verticalOffset + horizontalOffset] = CellType.Stairs;
-                            grid[prev + verticalOffset + horizontalOffset * 2] = CellType.Stairs;
-
-                            PlaceStairs(prev + horizontalOffset);
-                            PlaceStairs(prev + horizontalOffset * 2);
-                            PlaceStairs(prev + verticalOffset + horizontalOffset);
-                            PlaceStairs(prev + verticalOffset + horizontalOffset * 2);
+                    // 다음 노드와의 방향 설정
+                    if (i < path.Count - 1) {
+                        var next = path[i + 1];
+                        var direction = GetDirection(current, next);
+                        if (!node.OpenDirections.Contains(direction)) {
+                            node.OpenDirections.Add(direction);
                         }
                     }
                 }
@@ -428,11 +580,89 @@ public class Generator3D : MonoBehaviour {
                 // 복도 시각화
                 foreach (var pos in path) {
                     if (grid[pos] == CellType.Hallway) {
-                        PlaceHallway(pos);
+                        if (nodes.TryGetValue(pos, out Node node)) {
+                            PlaceHallway(pos, node.OpenDirections);
+                        }
+                    }
+                }
+
+                currentPathIndex++;
+            }
+        }
+    }
+
+    // 방의 가장자리 위치를 계산하는 메서드
+    private Vector3Int GetRoomEdgePosition(Room room, Room targetRoom, bool isStart) {
+        Vector3Int roomCenter = new Vector3Int(
+            (int)room.bounds.center.x,
+            room.bounds.yMin,
+            (int)room.bounds.center.z
+        );
+
+        Vector3Int targetCenter = new Vector3Int(
+            (int)targetRoom.bounds.center.x,
+            targetRoom.bounds.yMin,
+            (int)targetRoom.bounds.center.z
+        );
+
+        Vector3Int edgePos;
+        
+        if (isStart) {
+            // 시작점: 현재 방에서 목표 방으로 향하는 방향으로 가장자리 찾기
+            Vector3 direction = ((Vector3)(targetCenter - roomCenter)).normalized;
+            
+            if (Mathf.Abs(direction.x) > Mathf.Abs(direction.z)) {
+                // X 방향이 주된 이동 방향
+                edgePos = new Vector3Int(
+                    direction.x > 0 ? room.bounds.xMax - 1 : room.bounds.xMin,
+                    room.bounds.yMin,
+                    roomCenter.z
+                );
+            } else {
+                // Z 방향이 주된 이동 방향
+                edgePos = new Vector3Int(
+                    roomCenter.x,
+                    room.bounds.yMin,
+                    direction.z > 0 ? room.bounds.zMax - 1 : room.bounds.zMin
+                );
+            }
+        } else {
+            // 끝점: 상대 방에서 가장 가까운 현재 방의 가장자리 찾기
+            Vector3Int closestEdge = Vector3Int.zero;
+            float minDistance = float.MaxValue;
+
+            // 상대 방의 중심에서 가장 가까운 현재 방의 가장자리 찾기
+            // X축 가장자리 검사
+            int[] xPoints = new int[] { room.bounds.xMin, room.bounds.xMax - 1 };
+            foreach (int x in xPoints) {
+                for (int z = room.bounds.zMin; z < room.bounds.zMax; z++) {
+                    Vector3Int pos = new Vector3Int(x, room.bounds.yMin, z);
+                    float dist = Vector3.Distance(pos, targetCenter);
+                    if (dist < minDistance) {
+                        minDistance = dist;
+                        closestEdge = pos;
                     }
                 }
             }
+
+            // Z축 가장자리 검사
+            int[] zPoints = new int[] { room.bounds.zMin, room.bounds.zMax - 1 };
+            foreach (int z in zPoints) {
+                for (int x = room.bounds.xMin; x < room.bounds.xMax; x++) {
+                    Vector3Int pos = new Vector3Int(x, room.bounds.yMin, z);
+                    float dist = Vector3.Distance(pos, targetCenter);
+                    if (dist < minDistance) {
+                        minDistance = dist;
+                        closestEdge = pos;
+                    }
+                }
+            }
+
+            edgePos = closestEdge;
         }
+
+        Debug.Log($"방 가장자리 위치 계산: [{edgePos.x},{edgePos.y},{edgePos.z}] (시작점: {isStart})");
+        return edgePos;
     }
 
     // 큐브 오브젝트를 생성하여 배치하는 메서드
@@ -445,17 +675,155 @@ public class Generator3D : MonoBehaviour {
 
     // 방을 시각화하는 메서드 (빨간색)
     void PlaceRoom(Vector3Int location, Vector3Int size) {
-        PlaceCube(location, size, roomMaterial);
+        GameObject go = Instantiate(cubePrefab, location, Quaternion.identity);
+        go.transform.SetParent(roomsCategory.transform);
+        go.GetComponent<Transform>().localScale = size;
+        go.GetComponent<MeshRenderer>().material = roomMaterial;
+        go.name = $"Room-{++roomCounter}-[{location.x},{location.y},{location.z}]";
     }
 
     // 복도를 시각화하는 메서드 (파란색)
-    void PlaceHallway(Vector3Int location) {
-        PlaceCube(location, Vector3Int.one, hallwayMaterial);
+    void PlaceHallway(Vector3Int location, List<PathDirection> openDirections) {
+        // 이미 해당 위치에 시각화 오브젝트가 있는지 확인
+        Transform existingObject = tempParent.transform.Find($"Hallway-[{location.x},{location.y},{location.z}]");
+        if (existingObject != null) {
+            // 기존 오브젝트의 방향 정보 업데이트
+            UpdateHallwayDirections(existingObject.gameObject, openDirections);
+            return;
+        }
+
+        // 새로운 시각화 오브젝트 생성 (오프셋 제거)
+        GameObject go = Instantiate(cubePrefab, location, Quaternion.identity);
+        go.transform.SetParent(tempParent.transform);
+        go.GetComponent<Transform>().localScale = Vector3Int.one;
+        go.GetComponent<MeshRenderer>().material = hallwayMaterial;
+        go.name = $"Hallway-[{location.x},{location.y},{location.z}]";
+
+        // 방향에 따른 회전 설정
+        SetHallwayRotation(go, openDirections);
+
+        // 디버그 로그 추가
+        Debug.Log($"복도 오브젝트 생성 위치: [{location.x},{location.y},{location.z}]");
+    }
+
+    // 복도 오브젝트의 방향 정보 업데이트
+    private void UpdateHallwayDirections(GameObject hallway, List<PathDirection> openDirections) {
+        SetHallwayRotation(hallway, openDirections);
+    }
+
+    // 복도 오브젝트의 회전 설정
+    private void SetHallwayRotation(GameObject hallway, List<PathDirection> openDirections) {
+        // 방향에 따른 회전 로직 구현
+        // 예: X축과 Z축 방향이 모두 열려있는 경우 45도 회전 등
+        // 실제 구현은 시각화 요구사항에 따라 달라질 수 있음
     }
 
     // 계단을 시각화하는 메서드 (초록색)
-    void PlaceStairs(Vector3Int location) {
-        PlaceCube(location, Vector3Int.one, stairMaterial);
+    void PlaceStairs(Vector3Int[] stairPositions) {
+        if (stairPositions.Length != 4) {
+            Debug.LogError("계단 그룹은 정확히 4개의 위치가 필요합니다.");
+            return;
+        }
+
+        // 계단 그룹 생성
+        GameObject stairGroup = new GameObject($"Stair-[{stairPositions[0].x},{stairPositions[0].y},{stairPositions[0].z}]-[{stairPositions[3].x},{stairPositions[3].y},{stairPositions[3].z}]");
+        stairGroup.transform.SetParent(tempParent.transform);
+
+        // 각 계단 오브젝트 생성
+        for (int i = 0; i < 4; i++) {
+            GameObject go = Instantiate(cubePrefab, stairPositions[i], Quaternion.identity);
+            go.transform.SetParent(stairGroup.transform);
+            go.GetComponent<Transform>().localScale = Vector3Int.one;
+            go.GetComponent<MeshRenderer>().material = stairMaterial;
+            go.name = $"{(char)('A' + i)}[{stairPositions[i].x},{stairPositions[i].y},{stairPositions[i].z}]";
+        }
+    }
+
+    // 복도 그룹 생성 및 이름 변경
+    private void OrganizeHallways() {
+        // 모든 복도 오브젝트를 찾아서 그룹화
+        List<Transform> children = new List<Transform>();
+        foreach (Transform child in tempParent.transform) {
+            children.Add(child);
+        }
+
+        foreach (Transform child in children) {
+            if (child.name.StartsWith("Hallway-")) {
+                // 좌표 추출
+                string coordStr = child.name.Split('[')[1].Split(']')[0];
+                string[] coords = coordStr.Split(',');
+                Vector3Int location = new Vector3Int(
+                    int.Parse(coords[0]),
+                    int.Parse(coords[1]),
+                    int.Parse(coords[2])
+                );
+
+                // 해당 위치가 속한 경로 인덱스 찾기
+                if (!positionToPathIndex.TryGetValue(location, out int pathIndex)) {
+                    continue;
+                }
+
+                // 복도 그룹 생성 또는 가져오기
+                if (!pathGroups.ContainsKey(pathIndex)) {
+                    GameObject pathGroup = new GameObject($"Path-[{pathIndex + 1}]");
+                    pathGroup.transform.SetParent(pathsCategory.transform);
+                    pathGroups[pathIndex] = pathGroup;
+                }
+
+                // 복도 오브젝트를 그룹으로 이동
+                child.SetParent(pathGroups[pathIndex].transform);
+            }
+        }
+    }
+
+    // 계단 그룹 생성 및 이름 변경
+    private void OrganizeStairs() {
+        if (pathsCategory == null) {
+            Debug.LogError("Paths 카테고리가 초기화되지 않았습니다.");
+            return;
+        }
+
+        // 모든 계단 그룹을 찾아서 처리
+        List<Transform> children = new List<Transform>();
+        foreach (Transform child in tempParent.transform) {
+            children.Add(child);
+        }
+
+        foreach (Transform child in children) {
+            if (child.name.StartsWith("Stair-")) {
+                // 계단 그룹의 첫 번째 계단에서 좌표 추출
+                Transform firstStair = child.GetChild(0);
+                string coordStr = firstStair.name.Split('[')[1].Split(']')[0];
+                string[] coords = coordStr.Split(',');
+                Vector3Int location = new Vector3Int(
+                    int.Parse(coords[0]),
+                    int.Parse(coords[1]),
+                    int.Parse(coords[2])
+                );
+
+                // 해당 위치가 속한 경로 인덱스 찾기
+                if (!positionToPathIndex.TryGetValue(location, out int pathIndex)) {
+                    Debug.LogWarning($"계단 위치 {location}에 대한 경로 인덱스를 찾을 수 없습니다.");
+                    continue;
+                }
+
+                // 해당 경로의 부모 오브젝트 찾기
+                string pathName = $"Path-[{pathIndex + 1}]";
+                Transform pathParent = pathsCategory.transform.Find(pathName);
+                
+                if (pathParent == null) {
+                    continue;
+                }
+
+                // 계단 그룹을 해당 경로 아래로 이동
+                child.SetParent(pathParent);
+            }
+        }
+
+        // Temp 폴더에 남아있는 오브젝트들 제거
+        while (tempParent.transform.childCount > 0) {
+            DestroyImmediate(tempParent.transform.GetChild(0).gameObject);
+        }
     }
 
     private void OnDrawGizmosSelected() {
@@ -478,23 +846,106 @@ public class Generator3D : MonoBehaviour {
                     // 연결선 그리기
                     Gizmos.DrawLine(start, end);
                     
-                    // 방향 표시를 위한 구체 추가 (선택사항)
+                    // 방향 표시를 위한 구체 추가
                     Gizmos.DrawSphere(start, 0.2f);
                     Gizmos.DrawSphere(end, 0.2f);
                 }
             }
         }
+    }
 
-        // 실제 통로 경로 시각화
-        if (showPathLines && pathLines != null) {
-        Gizmos.color = pathColor;
-            foreach (var path in pathLines) {
-                for (int i = 1; i < path.Count; i++) {
-                    Vector3 start = path[i-1] + Vector3.one * 0.5f;
-                    Vector3 end = path[i] + Vector3.one * 0.5f;
+    private void OnDrawGizmos() {
+        if (nodes == null) return;
+
+        // 경로 생성 과정 시각화
+        if (pathLines != null) {
+            for (int i = 0; i < pathLines.Count; i++) {
+                var path = pathLines[i];
+                for (int j = 1; j < path.Count; j++) {
+                    Vector3 start = path[j-1] + new Vector3(0.5f, 0.5f, 0.5f);
+                    Vector3 end = path[j] + new Vector3(0.5f, 0.5f, 0.5f);
+
+                    // 경로의 시작점과 끝점을 다른 색상으로 표시
+                    if (j == 1) {
+                        Gizmos.color = Color.green;
+                        Gizmos.DrawSphere(start, 0.2f);
+                    }
+                    if (j == path.Count - 1) {
+                        Gizmos.color = Color.red;
+                        Gizmos.DrawSphere(end, 0.2f);
+                    }
+
+                    // 경로의 진행 방향을 화살표로 표시
+                    Gizmos.color = Color.blue;
                     Gizmos.DrawLine(start, end);
-                    Gizmos.DrawSphere(start, 0.1f);
+                    
+                    // 화살표 머리 그리기
+                    Vector3 direction = (end - start).normalized;
+                    Vector3 right = Quaternion.LookRotation(direction) * Quaternion.Euler(0, 180 + 20, 0) * Vector3.forward;
+                    Vector3 left = Quaternion.LookRotation(direction) * Quaternion.Euler(0, 180 - 20, 0) * Vector3.forward;
+                    Gizmos.DrawLine(end, end + right * 0.1f);
+                    Gizmos.DrawLine(end, end + left * 0.1f);
                 }
+            }
+        }
+
+        // 노드의 열린 방향 시각화
+        foreach (var node in nodes.Values) {
+            if (node.OpenDirections.Count == 0) continue;
+
+            Vector3 center = node.Position + new Vector3(0.5f, 0.5f, 0.5f);
+            float arrowLength = 0.3f;
+            float arrowHeadLength = 0.1f;
+            float arrowHeadAngle = 20.0f;
+
+            foreach (var direction in node.OpenDirections) {
+                Vector3 dir = Vector3.zero;
+                Color color = Color.white;
+
+                switch (direction) {
+                    case PathDirection.XPlus:
+                        dir = Vector3.right;
+                        color = Color.red;
+                        break;
+                    case PathDirection.XMinus:
+                        dir = Vector3.left;
+                        color = new Color(1f, 0.5f, 0.5f);
+                        break;
+                    case PathDirection.ZPlus:
+                        dir = Vector3.forward;
+                        color = Color.blue;
+                        break;
+                    case PathDirection.ZMinus:
+                        dir = Vector3.back;
+                        color = new Color(0.5f, 0.5f, 1f);
+                        break;
+                }
+
+                // 인접 셀 확인
+                Vector3Int neighborPos = node.Position + new Vector3Int(
+                    direction == PathDirection.XPlus ? 1 : direction == PathDirection.XMinus ? -1 : 0,
+                    0,
+                    direction == PathDirection.ZPlus ? 1 : direction == PathDirection.ZMinus ? -1 : 0
+                );
+
+                // 인접 셀이 없는 경우 다른 색상으로 표시
+                if (grid != null) {
+                    if (!grid.InBounds(neighborPos) || grid[neighborPos] == CellType.None) {
+                        color = Color.yellow;
+                    }
+                }
+
+                Gizmos.color = color;
+                Vector3 end = center + dir * arrowLength;
+                
+                // 화살표 몸통
+                Gizmos.DrawLine(center, end);
+                
+                // 화살표 머리
+                Vector3 right = Quaternion.LookRotation(dir) * Quaternion.Euler(0, 180 + arrowHeadAngle, 0) * Vector3.forward;
+                Vector3 left = Quaternion.LookRotation(dir) * Quaternion.Euler(0, 180 - arrowHeadAngle, 0) * Vector3.forward;
+                Gizmos.DrawLine(end, end + right * arrowHeadLength);
+                Gizmos.DrawLine(end, end + left * arrowHeadLength);
             }
         }
     }
