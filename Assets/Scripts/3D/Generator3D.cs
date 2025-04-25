@@ -4,6 +4,7 @@ using Random = System.Random;
 using Graphs;
 using System;
 using UnityEngine.Rendering;
+using System.Linq;
 
 /// <summary>
 /// 3D 절차적 던전 생성기 클래스
@@ -21,10 +22,12 @@ public class Generator3D : MonoBehaviour, ISerializationCallbackReceiver {
     // 3D 방을 나타내는 클래스
     class Room {
         public BoundsInt bounds;    // 방의 3차원 경계를 나타내는 직육면체
+        public RoomProperties Properties { get; set; }  // 방의 속성
 
         // 방 생성자: 위치와 크기를 받아 방의 경계를 설정
-        public Room(Vector3Int location, Vector3Int size) {
+        public Room(Vector3Int location, Vector3Int size, RoomType type = RoomType.Normal) {
             bounds = new BoundsInt(location, size);
+            Properties = new RoomProperties(type);
         }
 
         // 두 방이 서로 겹치는지 확인하는 메서드
@@ -91,6 +94,13 @@ public class Generator3D : MonoBehaviour, ISerializationCallbackReceiver {
     [SerializeField] private bool showMSTEdges = true;    // MST 간선 표시 여부
     [SerializeField] private Color mstColor = Color.blue;  // MST 간선 색상
     [SerializeField] private Color pathColor = Color.yellow;  // 통로 경로 색상
+
+    [Header("Room Properties")]
+    [SerializeField] private DungeonGenerationOptions generationOptions = new DungeonGenerationOptions();
+
+    private Room startRoom;
+    private Room exitRoom;
+    private Room merchantRoom;
 
     // Node 클래스에 방향 정보 추가
     [System.Serializable]
@@ -202,6 +212,8 @@ public class Generator3D : MonoBehaviour, ISerializationCallbackReceiver {
         if (tempParent != null) {
             DestroyImmediate(tempParent);
         }
+
+        SetRoomProperties();
 
         stopwatch.Stop();
 
@@ -711,7 +723,13 @@ public class Generator3D : MonoBehaviour, ISerializationCallbackReceiver {
         
         go.GetComponent<Transform>().localScale = size;
         go.GetComponent<MeshRenderer>().material = roomMaterial;
+        
+        // 기본 이름만 설정 (방 번호와 위치 정보)
         go.name = $"Room-{++roomCounter}-[{location.x},{location.y},{location.z}]";
+
+        // RoomVisualizer 컴포넌트 추가
+        var roomVisualizer = go.AddComponent<RoomVisualizer>();
+        roomVisualizer.RoomType = RoomType.Normal; // 기본값 설정
     }
 
     // 복도를 시각화하는 메서드 (파란색)
@@ -987,5 +1005,117 @@ public class Generator3D : MonoBehaviour, ISerializationCallbackReceiver {
             seed = savedSeed;
             Generate();
         }
+    }
+
+    private void SetRoomProperties() {
+        // 시작방 찾기 (원점에서 가장 가까운 방)
+        startRoom = FindClosestRoomToOrigin();
+        startRoom.Properties.RoomType = RoomType.Start;
+        startRoom.Properties.HasEnemies = random.Next(0, 100) < generationOptions.EnemySpawnChance;
+        startRoom.Properties.HasItemChest = random.Next(0, 100) < generationOptions.ItemChestSpawnChance;
+
+        // 출구방 찾기 (시작방에서 가장 먼 방)
+        exitRoom = FindFarthestRoomFromStart();
+        exitRoom.Properties.RoomType = RoomType.Exit;
+        exitRoom.Properties.HasEnemies = random.Next(0, 100) < generationOptions.EnemySpawnChance;
+        exitRoom.Properties.HasItemChest = random.Next(0, 100) < generationOptions.ItemChestSpawnChance;
+
+        // 보스 설정
+        if (generationOptions.SpawnBoss) {
+            exitRoom.Properties.HasBoss = true;
+            exitRoom.Properties.HasEnemies = true; // 보스 방은 무조건 적 출현
+        }
+
+        // 상점 방 설정
+        if (generationOptions.SpawnMerchant) {
+            int merchantRoomIndex = random.Next(0, rooms.Count);
+            merchantRoom = rooms[merchantRoomIndex];
+            merchantRoom.Properties.HasMerchant = true;
+        }
+
+        // 모든 방에 대해 속성 설정
+        foreach (var room in rooms) {
+            if (room == startRoom || room == exitRoom) continue;
+
+            // 적 출현 확률
+            if (random.Next(0, 100) < generationOptions.EnemySpawnChance) {
+                room.Properties.HasEnemies = true;
+            }
+
+            // 아이템 상자 출현 확률
+            if (random.Next(0, 100) < generationOptions.ItemChestSpawnChance) {
+                room.Properties.HasItemChest = true;
+            }
+        }
+
+        // 시각화 오브젝트의 RoomProperties 업데이트
+        UpdateRoomVisualization();
+    }
+
+    private void UpdateRoomVisualization() {
+        foreach (Transform child in roomsCategory.transform) {
+            // 기본 이름 구성
+            string baseName = child.name;
+            if (child.name.StartsWith("Room-")) {
+                var roomVisualizer = child.GetComponent<RoomVisualizer>();
+                if (roomVisualizer != null) {
+                    // 방 번호 추출
+                    string roomNumberStr = child.name.Split('-')[1].Split('[')[0];
+                    if (int.TryParse(roomNumberStr, out int roomIndex) && roomIndex <= rooms.Count) {
+                        var room = rooms[roomIndex - 1];
+                        roomVisualizer.RoomType = room.Properties.RoomType;
+                        roomVisualizer.HasEnemies = room.Properties.HasEnemies;
+                        roomVisualizer.HasItemChest = room.Properties.HasItemChest;
+                        roomVisualizer.HasMerchant = room.Properties.HasMerchant;
+                        roomVisualizer.HasBoss = room.Properties.HasBoss;
+
+                        // 방의 타입에 따라 접미사 추가
+                        if (room.Properties.RoomType == RoomType.Start) {
+                            baseName += "-Start";
+                        } else if (room.Properties.RoomType == RoomType.Exit) {
+                            baseName += "-End";
+                        }
+                        if (room.Properties.HasMerchant) {
+                            baseName += "-Shop";
+                        }
+                        
+                        child.name = baseName;
+                    }
+                }
+            }
+        }
+    }
+
+    private Room FindClosestRoomToOrigin() {
+        Room closestRoom = null;
+        float minDistance = float.MaxValue;
+        Vector3 origin = Vector3.zero;
+
+        foreach (var room in rooms) {
+            float distance = Vector3.Distance(room.bounds.center, origin);
+            if (distance < minDistance) {
+                minDistance = distance;
+                closestRoom = room;
+            }
+        }
+
+        return closestRoom;
+    }
+
+    private Room FindFarthestRoomFromStart() {
+        Room farthestRoom = null;
+        float maxDistance = 0;
+
+        foreach (var room in rooms) {
+            if (room == startRoom) continue;
+
+            float distance = Vector3.Distance(room.bounds.center, startRoom.bounds.center);
+            if (distance > maxDistance) {
+                maxDistance = distance;
+                farthestRoom = room;
+            }
+        }
+
+        return farthestRoom;
     }
 }
