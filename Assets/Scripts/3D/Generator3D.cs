@@ -8,7 +8,8 @@ using UnityEngine.Rendering;
 /// <summary>
 /// 3D 절차적 던전 생성기 클래스
 /// </summary>
-public class Generator3D : MonoBehaviour {
+[ExecuteInEditMode]
+public class Generator3D : MonoBehaviour, ISerializationCallbackReceiver {
     // 셀의 타입을 정의하는 열거형
     enum CellType {
         None,       // 빈 공간
@@ -71,11 +72,11 @@ public class Generator3D : MonoBehaviour {
     List<Room> rooms;           // 생성된 방들의 목록
     
     [SerializeField] [HideInInspector] 
-    HashSet<Prim.Edge> selectedEdges;                                           // 선택된 간선들
+    HashSet<Prim.Edge> selectedEdges = new HashSet<Prim.Edge>();  // 선택된 간선들
     [SerializeField] [HideInInspector] 
     private List<List<Vector3Int>> pathLines = new List<List<Vector3Int>>();    // 그리드 단위 경로
     [SerializeField] [HideInInspector] 
-    HashSet<Room> connectedRooms;                                               // 연결되지 않은 방을 추적하기 위한 연결된 방들의 집합
+    HashSet<Room> connectedRooms = new HashSet<Room>();  // 연결된 방들
 
     
     Random random;            // 난수 생성기
@@ -84,6 +85,7 @@ public class Generator3D : MonoBehaviour {
     [Header("Random Generation Options")]
     [SerializeField] private bool useRandomSeed = true;  // 랜덤 시드 사용 여부
     [SerializeField] private int seed = 0;               // 고정 시드 값
+    [SerializeField] [HideInInspector] private int savedSeed = 0;  // 저장된 시드 값
 
     [Header("Visualization Options")]
     [SerializeField] private bool showMSTEdges = true;    // MST 간선 표시 여부
@@ -91,11 +93,17 @@ public class Generator3D : MonoBehaviour {
     [SerializeField] private Color pathColor = Color.yellow;  // 통로 경로 색상
 
     // Node 클래스에 방향 정보 추가
+    [System.Serializable]
     public class Node {
         public Vector3Int Position { get; set; }
-        public List<PathDirection> OpenDirections { get; set; }  // 열린 방향 목록
-        public bool IsStair { get; set; }                        // 계단 여부
-        public int PathIndex { get; set; }                       // 속한 경로의 인덱스
+        [SerializeField]
+        private List<PathDirection> openDirections = new List<PathDirection>();
+        public List<PathDirection> OpenDirections {
+            get => openDirections;
+            set => openDirections = value;
+        }
+        public bool IsStair { get; set; }
+        public int PathIndex { get; set; }
 
         public Node(Vector3Int position) {
             Position = position;
@@ -103,9 +111,18 @@ public class Generator3D : MonoBehaviour {
             IsStair = false;
             PathIndex = -1;
         }
+
+        // 직렬화를 위한 기본 생성자
+        public Node() {
+            Position = Vector3Int.zero;
+            OpenDirections = new List<PathDirection>();
+            IsStair = false;
+            PathIndex = -1;
+        }
     }
 
     // 방향 정보를 나타내는 열거형
+    [System.Serializable]
     public enum PathDirection {
         None,       // 방향 없음
         XPlus,      // X축 양의 방향
@@ -113,6 +130,12 @@ public class Generator3D : MonoBehaviour {
         ZPlus,      // Z축 양의 방향
         ZMinus      // Z축 음의 방향
     }
+
+    [SerializeField] [HideInInspector]
+    private List<Node> serializedNodes = new List<Node>();  // 직렬화된 노드 목록
+
+    [SerializeField] [HideInInspector]
+    private Dictionary<Vector3Int, Node> nodes = new Dictionary<Vector3Int, Node>();  // 노드 정보를 저장할 딕셔너리
 
     // 두 위치 간의 방향을 계산하는 메서드
     private PathDirection GetDirection(Vector3Int from, Vector3Int to) {
@@ -137,11 +160,11 @@ public class Generator3D : MonoBehaviour {
         }
     }
 
-    private Dictionary<Vector3Int, Node> nodes;  // 노드 정보를 저장할 딕셔너리
-
     // 게임 시작 시 호출되는 메서드
     void Start() {
-        
+        if (savedSeed != 0) {
+            seed = savedSeed;
+        }
         Generate();
     }
 
@@ -163,6 +186,7 @@ public class Generator3D : MonoBehaviour {
         grid = new Grid3D<CellType>(size, Vector3Int.zero);   // 3D 그리드 초기화
         rooms = new List<Room>();                             // 방 목록 초기화
         nodes = new Dictionary<Vector3Int, Node>();           // 노드 정보 초기화
+        serializedNodes = new List<Node>();                   // 직렬화된 노드 목록 초기화
 
         PlaceRooms();        // 방 배치
         Triangulate();       // 삼각분할
@@ -170,6 +194,9 @@ public class Generator3D : MonoBehaviour {
         PathfindHallways();  // 경로 탐색 및 계단 배치
         OrganizeHallways();  // 복도 그룹화
         OrganizeStairs();    // 계단 그룹화 및 이름 변경
+
+        // 노드 정보 직렬화
+        serializedNodes = new List<Node>(nodes.Values);
 
         // 임시 부모 오브젝트 제거
         if (tempParent != null) {
@@ -879,12 +906,12 @@ public class Generator3D : MonoBehaviour {
                     Gizmos.color = Color.blue;
                     Gizmos.DrawLine(start, end);
                     
-                    // 화살표 머리 그리기
-                    Vector3 direction = (end - start).normalized;
-                    Vector3 right = Quaternion.LookRotation(direction) * Quaternion.Euler(0, 180 + 20, 0) * Vector3.forward;
-                    Vector3 left = Quaternion.LookRotation(direction) * Quaternion.Euler(0, 180 - 20, 0) * Vector3.forward;
-                    Gizmos.DrawLine(end, end + right * 0.1f);
-                    Gizmos.DrawLine(end, end + left * 0.1f);
+                    //// 화살표 머리 그리기
+                    //Vector3 direction = (end - start).normalized;
+                    //Vector3 right = Quaternion.LookRotation(direction) * Quaternion.Euler(0, 180 + 20, 0) * Vector3.forward;
+                    //Vector3 left = Quaternion.LookRotation(direction) * Quaternion.Euler(0, 180 - 20, 0) * Vector3.forward;
+                    //Gizmos.DrawLine(end, end + right * 0.1f);
+                    //Gizmos.DrawLine(end, end + left * 0.1f);
                 }
             }
         }
@@ -913,11 +940,11 @@ public class Generator3D : MonoBehaviour {
                         break;
                     case PathDirection.ZPlus:
                         dir = Vector3.forward;
-                        color = Color.blue;
+                        color = Color.white;
                         break;
                     case PathDirection.ZMinus:
                         dir = Vector3.back;
-                        color = new Color(0.5f, 0.5f, 1f);
+                        color = Color.black;
                         break;
                 }
 
@@ -947,6 +974,30 @@ public class Generator3D : MonoBehaviour {
                 Gizmos.DrawLine(end, end + right * arrowHeadLength);
                 Gizmos.DrawLine(end, end + left * arrowHeadLength);
             }
+        }
+    }
+
+    private void OnValidate() {
+        // Scene 저장 시 useRandomSeed가 체크되어 있다면 현재 시드를 저장
+        if (useRandomSeed && Application.isPlaying == false) {
+            savedSeed = seed;
+            useRandomSeed = false;
+            Generate();
+        }
+    }
+
+    public void OnBeforeSerialize() {
+        // 직렬화 전에 실행되는 코드
+    }
+
+    public void OnAfterDeserialize() {
+        // 역직렬화 후에 실행되는 코드
+    }
+
+    private void Awake() {
+        if (savedSeed != 0) {
+            seed = savedSeed;
+            Generate();
         }
     }
 }
