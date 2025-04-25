@@ -704,6 +704,11 @@ public class Generator3D : MonoBehaviour, ISerializationCallbackReceiver {
     void PlaceRoom(Vector3Int location, Vector3Int size) {
         GameObject go = Instantiate(cubePrefab, location, Quaternion.identity);
         go.transform.SetParent(roomsCategory.transform);
+        
+        // 스케일에 따른 오프셋 계산 (크기에서 1을 뺀 값으로 계산)
+        Vector3 offset = new Vector3((size.x - 1) * 0.5f, (size.y - 1) * 0.5f, (size.z - 1) * 0.5f);
+        go.transform.position = location + offset;
+        
         go.GetComponent<Transform>().localScale = size;
         go.GetComponent<MeshRenderer>().material = roomMaterial;
         go.name = $"Room-{++roomCounter}-[{location.x},{location.y},{location.z}]";
@@ -719,7 +724,6 @@ public class Generator3D : MonoBehaviour, ISerializationCallbackReceiver {
             return;
         }
 
-        // 새로운 시각화 오브젝트 생성 (오프셋 제거)
         GameObject go = Instantiate(cubePrefab, location, Quaternion.identity);
         go.transform.SetParent(tempParent.transform);
         go.GetComponent<Transform>().localScale = Vector3Int.one;
@@ -866,9 +870,9 @@ public class Generator3D : MonoBehaviour, ISerializationCallbackReceiver {
                     var startRoom = u.Item;
                     var endRoom = v.Item;
 
-                    // 방의 중심점 계산 (0.5f 오프셋 추가)
-                    Vector3 start = startRoom.bounds.center + Vector3.one * 0.5f;
-                    Vector3 end = endRoom.bounds.center + Vector3.one * 0.5f;
+                    // 방의 중심점 계산
+                    Vector3 start = startRoom.bounds.center;
+                    Vector3 end = endRoom.bounds.center;
 
                     // 연결선 그리기
                     Gizmos.DrawLine(start, end);
@@ -889,8 +893,8 @@ public class Generator3D : MonoBehaviour, ISerializationCallbackReceiver {
             for (int i = 0; i < pathLines.Count; i++) {
                 var path = pathLines[i];
                 for (int j = 1; j < path.Count; j++) {
-                    Vector3 start = path[j-1] + new Vector3(0.5f, 0.5f, 0.5f);
-                    Vector3 end = path[j] + new Vector3(0.5f, 0.5f, 0.5f);
+                    Vector3 start = path[j-1];
+                    Vector3 end = path[j];
 
                     // 경로의 시작점과 끝점을 다른 색상으로 표시
                     if (j == 1) {
@@ -905,13 +909,6 @@ public class Generator3D : MonoBehaviour, ISerializationCallbackReceiver {
                     // 경로의 진행 방향을 화살표로 표시
                     Gizmos.color = Color.blue;
                     Gizmos.DrawLine(start, end);
-                    
-                    //// 화살표 머리 그리기
-                    //Vector3 direction = (end - start).normalized;
-                    //Vector3 right = Quaternion.LookRotation(direction) * Quaternion.Euler(0, 180 + 20, 0) * Vector3.forward;
-                    //Vector3 left = Quaternion.LookRotation(direction) * Quaternion.Euler(0, 180 - 20, 0) * Vector3.forward;
-                    //Gizmos.DrawLine(end, end + right * 0.1f);
-                    //Gizmos.DrawLine(end, end + left * 0.1f);
                 }
             }
         }
@@ -920,7 +917,7 @@ public class Generator3D : MonoBehaviour, ISerializationCallbackReceiver {
         foreach (var node in nodes.Values) {
             if (node.OpenDirections.Count == 0) continue;
 
-            Vector3 center = node.Position + new Vector3(0.5f, 0.5f, 0.5f);
+            Vector3 center = node.Position;
             float arrowLength = 0.3f;
             float arrowHeadLength = 0.1f;
             float arrowHeadAngle = 20.0f;
@@ -974,15 +971,6 @@ public class Generator3D : MonoBehaviour, ISerializationCallbackReceiver {
                 Gizmos.DrawLine(end, end + right * arrowHeadLength);
                 Gizmos.DrawLine(end, end + left * arrowHeadLength);
             }
-        }
-    }
-
-    private void OnValidate() {
-        // Scene 저장 시 useRandomSeed가 체크되어 있다면 현재 시드를 저장
-        if (useRandomSeed && Application.isPlaying == false) {
-            savedSeed = seed;
-            useRandomSeed = false;
-            Generate();
         }
     }
 

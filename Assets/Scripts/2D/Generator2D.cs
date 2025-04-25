@@ -147,15 +147,6 @@ public class Generator2D : MonoBehaviour, ISerializationCallbackReceiver {
     [SerializeField] [HideInInspector]
     private Dictionary<Vector2Int, int> positionToPathIndex = new Dictionary<Vector2Int, int>();  // 위치별 경로 인덱스
 
-    private void OnValidate() {
-        // Scene 저장 시 useRandomSeed가 체크되어 있다면 현재 시드를 저장
-        if (useRandomSeed && Application.isPlaying == false) {
-            savedSeed = seed;
-            useRandomSeed = false;
-            Generate();
-        }
-    }
-
     public void OnBeforeSerialize() {
         // 직렬화 전에 실행되는 코드
     }
@@ -574,14 +565,15 @@ public class Generator2D : MonoBehaviour, ISerializationCallbackReceiver {
 
     // 방을 시각화하는 메서드
     void PlaceRoom(Vector2Int location, Vector2Int size) {
-        GameObject roomObj = new GameObject($"Room-{rooms.Count}-[{location.x},{location.y}]");
-        roomObj.transform.SetParent(roomsParent.transform);
-        roomObj.transform.position = new Vector3(location.x, 0, location.y);
+        // 스케일에 따른 오프셋 계산 (크기에서 1을 뺀 값으로 계산)
+        Vector3 offset = new Vector3((size.x - 1) * 0.5f, 0, (size.y - 1) * 0.5f);
+        Vector3 position = new Vector3(location.x, 0, location.y) + offset;
         
-        GameObject cube = Instantiate(cubePrefab, new Vector3(location.x, 0, location.y), Quaternion.identity);
-        cube.transform.SetParent(roomObj.transform);
-        cube.transform.localScale = new Vector3(size.x, 1, size.y);
-        cube.GetComponent<MeshRenderer>().material = redMaterial;
+        GameObject roomObj = Instantiate(cubePrefab, position, Quaternion.identity);
+        roomObj.transform.SetParent(roomsParent.transform);
+        roomObj.transform.localScale = new Vector3(size.x, 1, size.y);
+        roomObj.GetComponent<MeshRenderer>().material = redMaterial;
+        roomObj.name = $"Room-{rooms.Count}-[{location.x},{location.y}]";
     }
 
     // 복도를 시각화하는 메서드
@@ -610,8 +602,8 @@ public class Generator2D : MonoBehaviour, ISerializationCallbackReceiver {
             Gizmos.color = mstColor;
             foreach (var edge in selectedEdges) {
                 if (edge?.U is Vertex<Room> u && edge?.V is Vertex<Room> v) {
-                    Vector3 start = new Vector3(u.Item.bounds.center.x, 0, u.Item.bounds.center.y) + Vector3.one * 0.5f;
-                    Vector3 end = new Vector3(v.Item.bounds.center.x, 0, v.Item.bounds.center.y) + Vector3.one * 0.5f;
+                    Vector3 start = new Vector3(u.Item.bounds.center.x, 0, u.Item.bounds.center.y);
+                    Vector3 end = new Vector3(v.Item.bounds.center.x, 0, v.Item.bounds.center.y);
                     Gizmos.DrawLine(start, end);
 
                     // 방향 표시를 위한 구체 추가
@@ -625,8 +617,8 @@ public class Generator2D : MonoBehaviour, ISerializationCallbackReceiver {
             Gizmos.color = pathColor;
             foreach (var path in pathLines) {
                 for (int i = 1; i < path.Count; i++) {
-                    Vector3 start = new Vector3(path[i-1].x, 0, path[i-1].y) + Vector3.one * 0.5f;
-                    Vector3 end = new Vector3(path[i].x, 0, path[i].y) + Vector3.one * 0.5f;
+                    Vector3 start = new Vector3(path[i-1].x, 0, path[i-1].y);
+                    Vector3 end = new Vector3(path[i].x, 0, path[i].y);
                     Gizmos.DrawLine(start, end);
 
                     // 방향 표시를 위한 구체 추가
@@ -653,7 +645,7 @@ public class Generator2D : MonoBehaviour, ISerializationCallbackReceiver {
             foreach (var node in nodes.Values) {
                 if (node.OpenDirections.Count == 0) continue;
 
-                Vector3 center = new Vector3(node.Position.x, 0, node.Position.y) + Vector3.one * 0.5f;
+                Vector3 center = new Vector3(node.Position.x, 0, node.Position.y);
                 float arrowLength = 0.3f;
                 float arrowHeadLength = 0.1f;
                 float arrowHeadAngle = 20.0f;
