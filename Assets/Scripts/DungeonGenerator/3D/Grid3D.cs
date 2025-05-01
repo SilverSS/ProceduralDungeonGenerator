@@ -52,8 +52,21 @@ public class Grid3D<T> {
     }
 
     /// <summary>
-    /// Vector3Int를 사용한 그리드 접근 인덱서
+    /// 3D 그리드의 인덱서 구현
+    /// 오프셋을 적용한 위치에 대한 데이터 접근을 제공
     /// </summary>
+    /// <param name="pos">접근하려는 3D 위치</param>
+    /// <returns>해당 위치의 데이터</returns>
+    /// <remarks>
+    /// 동작 방식:
+    /// 1. 입력받은 위치에 오프셋 적용
+    /// 2. 1차원 배열 인덱스로 변환
+    /// 3. 데이터 접근 또는 수정
+    /// 
+    /// 주의사항:
+    /// - 범위를 벗어난 접근 시 예외 발생 가능
+    /// - 올바른 오프셋 설정 필요
+    /// </remarks>
     public T this[Vector3Int pos] {
         get {
             pos += Offset;

@@ -277,8 +277,8 @@ public class Generator3D : MonoBehaviour, ISerializationCallbackReceiver {
             bool add = true;
             Room3D newRoom = new Room3D(location, roomSize);
             // 방 주변에 버퍼 영역 생성
-            Room3D buffer = new Room3D(location + new Vector3Int(-2, -2, -2), 
-                                 roomSize + new Vector3Int(4, 4, 4));
+            Room3D buffer = new Room3D(location + new Vector3Int(-2, -0, -2), 
+                                 roomSize + new Vector3Int(2, 0, 2));
 
             // 다른 방들과의 겹침 검사
             foreach (var room in rooms) {
@@ -449,12 +449,21 @@ public class Generator3D : MonoBehaviour, ISerializationCallbackReceiver {
             var startLowestY = startRoom.bounds.yMin;
             var endLowestY = endRoom.bounds.yMin;
 
-            // 시작점과 도착점을 방의 가장자리까지 확장
-            var startPos = GetRoomEdgePosition(startRoom, endRoom, true);
-            var endPos = GetRoomEdgePosition(endRoom, startRoom, false);
+            // 시작점과 도착점을 방의 중심점으로 설정
+            var startPos = new Vector3Int(
+                (int)startRoom.bounds.center.x,
+                startLowestY,
+                (int)startRoom.bounds.center.z
+            );
+            var endPos = new Vector3Int(
+                (int)endRoom.bounds.center.x,
+                endLowestY,
+                (int)endRoom.bounds.center.z
+            );
 
             var path = aStar.FindPath(startPos, endPos, (DungeonPathfinder3D.Node a, DungeonPathfinder3D.Node b) => {
                 var pathCost = new DungeonPathfinder3D.PathCost();
+                pathCost.traversable = false;
                 var delta = b.Position - a.Position;
 
                 // 계단 영역을 통과할 수 없도록 설정
@@ -470,9 +479,11 @@ public class Generator3D : MonoBehaviour, ISerializationCallbackReceiver {
                     if (grid[b.Position] == CellType.Room) {
                         pathCost.cost += 5;  // 방을 통과하는 비용
                     } else if (grid[b.Position] == CellType.None) {
-                        pathCost.cost += 1;  // 빈 공간을 통과하는 비용
+                        pathCost.cost += 2;  // 빈 공간을 통과하는 비용
+                    } else if (grid[b.Position] == CellType.Hallway) {
+                        pathCost.cost += 1;  // 복도를 통과하는 비용
                     }
-
+                    
                     pathCost.traversable = true;
                 } else {
                     // 계단 설치의 경우
@@ -515,6 +526,7 @@ public class Generator3D : MonoBehaviour, ISerializationCallbackReceiver {
                         return pathCost;
                     }
 
+
                     pathCost.traversable = true;
                     pathCost.isStairs = true;
                 }
@@ -524,21 +536,6 @@ public class Generator3D : MonoBehaviour, ISerializationCallbackReceiver {
 
             // 경로가 존재하는 경우에만 처리
             if (path != null && path.Count > 0) {
-                // 목표 방의 외곽에 처음 닿는 지점을 찾아 경로를 자릅니다
-                int endIndex = path.Count;
-                for (int i = 0; i < path.Count; i++) {
-                    var pos = path[i];
-                    // 현재 위치가 목표 방 안에 있는지 확인
-                    if (endRoom.bounds.Contains(pos)) {
-                        // 현재 위치(외곽)까지 포함
-                        endIndex = i + 1;
-                        break;
-                    }
-                }
-
-                // 경로를 외곽 지점까지 사용
-                path = path.GetRange(0, endIndex);
-                
                 // 경로 저장
                 pathLines.Add(new List<Vector3Int>(path));
 
@@ -630,98 +627,6 @@ public class Generator3D : MonoBehaviour, ISerializationCallbackReceiver {
             AnalyzeRoomCells(room);
             VisualizeRoom(room);
         }
-    }
-
-    // 방의 가장자리 위치를 계산하는 메서드
-    private Vector3Int GetRoomEdgePosition(Room3D room, Room3D targetRoom, bool isStart) {
-        Vector3Int roomCenter = new Vector3Int(
-            (int)room.bounds.center.x,
-            room.bounds.yMin,
-            (int)room.bounds.center.z
-        );
-
-        Vector3Int targetCenter = new Vector3Int(
-            (int)targetRoom.bounds.center.x,
-            targetRoom.bounds.yMin,
-            (int)targetRoom.bounds.center.z
-        );
-
-        Vector3Int edgePos;
-        
-        if (isStart) {
-            // 시작점: 현재 방에서 목표 방으로 향하는 방향으로 가장자리 찾기
-            Vector3 direction = ((Vector3)(targetCenter - roomCenter)).normalized;
-            
-            if (Mathf.Abs(direction.x) > Mathf.Abs(direction.z)) {
-                // X 방향이 주된 이동 방향
-                edgePos = new Vector3Int(
-                    direction.x > 0 ? room.bounds.xMax - 1 : room.bounds.xMin,
-                    room.bounds.yMin,
-                    roomCenter.z
-                );
-            } else {
-                // Z 방향이 주된 이동 방향
-                edgePos = new Vector3Int(
-                    roomCenter.x,
-                    room.bounds.yMin,
-                    direction.z > 0 ? room.bounds.zMax - 1 : room.bounds.zMin
-                );
-            }
-        } else {
-            // 끝점: 상대 방에서 가장 가까운 현재 방의 가장자리 찾기
-            Vector3Int closestEdge = Vector3Int.zero;
-            float minDistance = float.MaxValue;
-
-            // 상대 방의 중심에서 가장 가까운 현재 방의 가장자리 찾기
-            // X축 가장자리 검사
-            int[] xPoints = new int[] { room.bounds.xMin, room.bounds.xMax - 1 };
-            foreach (int x in xPoints) {
-                for (int z = room.bounds.zMin; z < room.bounds.zMax; z++) {
-                    Vector3Int pos = new Vector3Int(x, room.bounds.yMin, z);
-                    float dist = Vector3.Distance(pos, targetCenter);
-                    if (dist < minDistance) {
-                        minDistance = dist;
-                        closestEdge = pos;
-                    }
-                }
-            }
-
-            // Z축 가장자리 검사
-            int[] zPoints = new int[] { room.bounds.zMin, room.bounds.zMax - 1 };
-            foreach (int z in zPoints) {
-                for (int x = room.bounds.xMin; x < room.bounds.xMax; x++) {
-                    Vector3Int pos = new Vector3Int(x, room.bounds.yMin, z);
-                    float dist = Vector3.Distance(pos, targetCenter);
-                    if (dist < minDistance) {
-                        minDistance = dist;
-                        closestEdge = pos;
-                    }
-                }
-            }
-
-            edgePos = closestEdge;
-        }
-
-        return edgePos;
-    }
-
-    // 큐브 오브젝트를 생성하여 배치하는 메서드
-    void PlaceCube(Vector3Int location, Vector3Int size, Material material) {
-        // 월드 좌표 계산
-        Vector3 worldPos = new Vector3(
-            location.x * UnitPerGrid,
-            location.y * UnitPerGrid,
-            location.z * UnitPerGrid
-        );
-
-        GameObject go = Instantiate(cubePrefab, worldPos, Quaternion.identity);
-        go.transform.SetParent(transform);
-        go.GetComponent<Transform>().localScale = new Vector3(
-            size.x * UnitPerGrid,
-            size.y * UnitPerGrid,
-            size.z * UnitPerGrid
-        );
-        go.GetComponent<MeshRenderer>().material = material;
     }
 
     // 방을 시각화하는 메서드 (빨간색)
@@ -925,44 +830,23 @@ public class Generator3D : MonoBehaviour, ISerializationCallbackReceiver {
         }
     }
 
-    private void OnDrawGizmosSelected() {
-        if (selectedEdges == null) {
-            return;
-        }
+    private void OnDrawGizmos() {
+        if (nodes == null) return;
 
-        // MST 간선 시각화
         if (showMSTEdges) {
             Gizmos.color = mstColor;
             foreach (var edge in selectedEdges) {
                 if (edge?.U is Vertex<Room3D> u && edge?.V is Vertex<Room3D> v) {
-                    var startRoom = u.Item;
-                    var endRoom = v.Item;
-
-                    // 방의 중심점 계산 (UnitPerGrid 적용)
-                    Vector3 start = new Vector3(
-                        startRoom.bounds.center.x * UnitPerGrid,
-                        startRoom.bounds.center.y * UnitPerGrid,
-                        startRoom.bounds.center.z * UnitPerGrid
-                    );
-                    Vector3 end = new Vector3(
-                        endRoom.bounds.center.x * UnitPerGrid,
-                        endRoom.bounds.center.y * UnitPerGrid,
-                        endRoom.bounds.center.z * UnitPerGrid
-                    );
-
-                    // 연결선 그리기
+                    Vector3 start = u.Item.bounds.center * UnitPerGrid;
+                    Vector3 end = v.Item.bounds.center * UnitPerGrid;
                     Gizmos.DrawLine(start, end);
-                    
+
                     // 방향 표시를 위한 구체 추가
-                    Gizmos.DrawSphere(start, 0.2f * UnitPerGrid);
-                    Gizmos.DrawSphere(end, 0.2f * UnitPerGrid);
+                    Gizmos.DrawSphere(start, 0.5f);
+                    Gizmos.DrawSphere(end, 0.5f);
                 }
             }
         }
-    }
-
-    private void OnDrawGizmos() {
-        if (nodes == null) return;
 
         // 경로 생성 과정 시각화
         if (pathLines != null) {
@@ -998,16 +882,37 @@ public class Generator3D : MonoBehaviour, ISerializationCallbackReceiver {
             }
         }
 
-        // 노드의 열린 방향 시각화
+        // 노드의 열린 방향과 셀 타입 시각화
         foreach (var node in nodes.Values) {
             if (node.OuterDirections.Count == 0) continue;
 
-            // UnitPerGrid 적용
             Vector3 center = new Vector3(
                 node.Position.x * UnitPerGrid,
                 node.Position.y * UnitPerGrid,
                 node.Position.z * UnitPerGrid
             );
+
+            // 셀 타입 표시를 위한 텍스트
+            string cellType = "N"; // None을 기본값으로
+            if (grid != null && grid.InBounds(node.Position)) {
+                switch (grid[node.Position]) {
+                    case CellType.Room:
+                        cellType = "R";
+                        break;
+                    case CellType.Hallway:
+                        cellType = "H";
+                        break;
+                    case CellType.Stairs:
+                        cellType = "S";
+                        break;
+                }
+            }
+            
+#if UNITY_EDITOR
+            // 셀 타입 텍스트 표시
+            UnityEditor.Handles.Label(center, cellType);
+#endif
+
             float arrowLength = 0.3f * UnitPerGrid;
             float arrowHeadLength = 0.1f * UnitPerGrid;
             float arrowHeadAngle = 20.0f;
@@ -1164,6 +1069,15 @@ public class Generator3D : MonoBehaviour, ISerializationCallbackReceiver {
         }
     }
 
+    /// <summary>
+    /// 원점에서 가장 가까운 방을 찾는 메서드
+    /// </summary>
+    /// <returns>원점에서 가장 가까운 Room3D 객체</returns>
+    /// <remarks>
+    /// 1. 모든 방을 순회하며 원점과의 거리 계산
+    /// 2. 가장 짧은 거리를 가진 방을 선택
+    /// 3. 시작 지점 설정에 활용
+    /// </remarks>
     private Room3D FindClosestRoomToOrigin() {
         Room3D closestRoom = null;
         float minDistance = float.MaxValue;
@@ -1180,6 +1094,15 @@ public class Generator3D : MonoBehaviour, ISerializationCallbackReceiver {
         return closestRoom;
     }
 
+    /// <summary>
+    /// 시작 방에서 가장 먼 방을 찾는 메서드
+    /// </summary>
+    /// <returns>시작 방에서 가장 먼 Room3D 객체</returns>
+    /// <remarks>
+    /// 1. 시작 방을 제외한 모든 방을 순회
+    /// 2. 시작 방과의 거리를 계산하여 가장 먼 방 선택
+    /// 3. 보스방이나 목표 지점 설정에 활용
+    /// </remarks>
     private Room3D FindFarthestRoomFromStart() {
         Room3D farthestRoom = null;
         float maxDistance = 0;
@@ -1197,6 +1120,17 @@ public class Generator3D : MonoBehaviour, ISerializationCallbackReceiver {
         return farthestRoom;
     }
 
+    /// <summary>
+    /// 주어진 방향에 대한 위치 오프셋을 반환하는 메서드
+    /// </summary>
+    /// <param name="direction">이동 방향</param>
+    /// <returns>해당 방향으로의 이동을 나타내는 Vector3Int</returns>
+    /// <remarks>
+    /// 방향별 오프셋:
+    /// - X축: 동(+1,0,0), 서(-1,0,0)
+    /// - Y축: 상(0,+1,0), 하(0,-1,0)
+    /// - Z축: 북(0,0,+1), 남(0,0,-1)
+    /// </remarks>
     private Vector3Int GetDirectionOffset(PathDirection direction) {
         switch (direction) {
             case PathDirection.XPlus: return new Vector3Int(1, 0, 0);
@@ -1209,6 +1143,27 @@ public class Generator3D : MonoBehaviour, ISerializationCallbackReceiver {
         }
     }
 
+    /// <summary>
+    /// 방의 각 셀의 특성을 분석하는 메서드
+    /// </summary>
+    /// <param name="room">분석할 Room3D 객체</param>
+    /// <remarks>
+    /// 분석 과정:
+    /// 1. 각 셀의 모든 방향 검사
+    /// 2. 외부로 향하는 방향 식별
+    /// 3. 복도와 연결된 출입구 위치 확인
+    /// 4. 각 셀의 특성 정보 저장
+    /// 
+    /// 특성 분석 항목:
+    /// - 외부로 향하는 방향(OuterDirections)
+    /// - 출입구 여부(IsEntrance)
+    /// - 출입구 방향(EntranceDirections)
+    /// 
+    /// 활용:
+    /// - 복도 연결 지점 결정
+    /// - 방 내부 구조물 배치
+    /// - 시각적 디버깅 지원
+    /// </remarks>
     private void AnalyzeRoomCells(Room3D room) {
         foreach (var pos in room.bounds.allPositionsWithin) {
             var cellProps = new CellProperties(pos);
@@ -1234,7 +1189,7 @@ public class Generator3D : MonoBehaviour, ISerializationCallbackReceiver {
                         if (neighborNode.OuterDirections.Contains(oppositeDirection)) {
                             cellProps.IsEntrance = true;
                             cellProps.EntranceDirections.Add(direction);
-                            Debug.Log($"출입구 추가: 위치 {pos}, 방향 {direction}");
+                            //Debug.Log($"출입구 추가: 위치 {pos}, 방향 {direction}");
                         }
                     }
                 }

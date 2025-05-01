@@ -401,9 +401,15 @@ public class Generator2D : MonoBehaviour, ISerializationCallbackReceiver {
             var startRoom = (edge.U as Vertex<Room2D>).Item;
             var endRoom = (edge.V as Vertex<Room2D>).Item;
 
-            // 방 가장자리 위치 계산
-            var startPos = GetRoomEdgePosition(startRoom, endRoom, true);
-            var endPos = GetRoomEdgePosition(endRoom, startRoom, false);
+            // 시작점과 도착점을 방의 중심점으로 설정
+            var startPos = new Vector2Int(
+                (int)startRoom.bounds.center.x,
+                (int)startRoom.bounds.center.y
+            );
+            var endPos = new Vector2Int(
+                (int)endRoom.bounds.center.x,
+                (int)endRoom.bounds.center.y
+            );
 
             Debug.Log($"경로 탐색 시작: 시작점 [{startPos.x},{startPos.y}] -> 끝점 [{endPos.x},{endPos.y}]");
 
@@ -429,21 +435,6 @@ public class Generator2D : MonoBehaviour, ISerializationCallbackReceiver {
 
             // 경로가 존재하는 경우 복도 생성
             if (path != null) {
-                // 목표 방의 외곽에 처음 닿는 지점을 찾아 경로를 자릅니다
-                int endIndex = path.Count;
-                for (int i = 0; i < path.Count; i++) {
-                    var pos = path[i];
-                    // 현재 위치가 목표 방 안에 있는지 확인
-                    if (IsPositionInRoom(pos, endRoom)) {
-                        // 현재 위치(외곽)까지 포함
-                        endIndex = i + 1;
-                        break;
-                    }
-                }
-
-                // 경로를 외곽 지점까지 사용
-                path = path.GetRange(0, endIndex);
-                
                 // 경로 저장
                 pathLines.Add(path);
                 
@@ -503,83 +494,6 @@ public class Generator2D : MonoBehaviour, ISerializationCallbackReceiver {
     private bool IsPositionInRoom(Vector2Int position, Room2D room) {
         return position.x >= room.bounds.xMin && position.x < room.bounds.xMax && 
                position.y >= room.bounds.yMin && position.y < room.bounds.yMax;
-    }
-    
-    // 방의 가장자리 위치를 계산하는 메서드 (3D와 유사하게 구현)
-    private Vector2Int GetRoomEdgePosition(Room2D room, Room2D targetRoom, bool isStart) {
-        Vector2Int roomCenter = new Vector2Int(
-            (int)room.bounds.center.x,
-            (int)room.bounds.center.y
-        );
-
-        Vector2Int targetCenter = new Vector2Int(
-            (int)targetRoom.bounds.center.x,
-            (int)targetRoom.bounds.center.y
-        );
-
-        Vector2Int edgePos;
-        
-        if (isStart) {
-            // 시작점: 현재 방에서 목표 방으로 향하는 방향으로 가장자리 찾기
-            Vector2 direction = ((Vector2)(targetCenter - roomCenter)).normalized;
-            
-            if (Mathf.Abs(direction.x) > Mathf.Abs(direction.y)) {
-                // X 방향이 주된 이동 방향
-                edgePos = new Vector2Int(
-                    direction.x > 0 ? room.bounds.xMax - 1 : room.bounds.xMin,
-                    roomCenter.y
-                );
-            } else {
-                // Y 방향이 주된 이동 방향
-                edgePos = new Vector2Int(
-                    roomCenter.x,
-                    direction.y > 0 ? room.bounds.yMax - 1 : room.bounds.yMin
-                );
-            }
-        } else {
-            // 끝점: 상대 방에서 가장 가까운 현재 방의 가장자리 찾기
-            Vector2Int closestEdge = Vector2Int.zero;
-            float minDistance = float.MaxValue;
-
-            // X축 가장자리 검사
-            int[] xPoints = new int[] { room.bounds.xMin, room.bounds.xMax - 1 };
-            foreach (int x in xPoints) {
-                for (int y = room.bounds.yMin; y < room.bounds.yMax; y++) {
-                    Vector2Int pos = new Vector2Int(x, y);
-                    float dist = Vector2.Distance(pos, targetCenter);
-                    if (dist < minDistance) {
-                        minDistance = dist;
-                        closestEdge = pos;
-                    }
-                }
-            }
-
-            // Y축 가장자리 검사
-            int[] yPoints = new int[] { room.bounds.yMin, room.bounds.yMax - 1 };
-            foreach (int y in yPoints) {
-                for (int x = room.bounds.xMin; x < room.bounds.xMax; x++) {
-                    Vector2Int pos = new Vector2Int(x, y);
-                    float dist = Vector2.Distance(pos, targetCenter);
-                    if (dist < minDistance) {
-                        minDistance = dist;
-                        closestEdge = pos;
-                    }
-                }
-            }
-
-            edgePos = closestEdge;
-        }
-
-        Debug.Log($"방 가장자리 위치 계산: [{edgePos.x},{edgePos.y}] (시작점: {isStart})");
-        return edgePos;
-    }
-
-    // 3D 큐브를 생성하는 메서드
-    void PlaceCube(Vector2Int location, Vector2Int size, Material material) {
-        GameObject go = Instantiate(cubePrefab, new Vector3(location.x, 0, location.y), Quaternion.identity);
-        go.transform.SetParent(transform);
-        go.GetComponent<Transform>().localScale = new Vector3(size.x, 1, size.y);
-        go.GetComponent<MeshRenderer>().material = material;
     }
 
     // 방을 시각화하는 메서드
@@ -842,5 +756,13 @@ public class Generator2D : MonoBehaviour, ISerializationCallbackReceiver {
         }
 
         return farthestRoom;
+    }
+
+    // 3D 큐브를 생성하는 메서드
+    void PlaceCube(Vector2Int location, Vector2Int size, Material material) {
+        GameObject go = Instantiate(cubePrefab, new Vector3(location.x, 0, location.y), Quaternion.identity);
+        go.transform.SetParent(transform);
+        go.GetComponent<Transform>().localScale = new Vector3(size.x, 1, size.y);
+        go.GetComponent<MeshRenderer>().material = material;
     }
 }
