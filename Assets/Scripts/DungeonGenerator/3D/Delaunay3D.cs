@@ -29,6 +29,24 @@ using UnityEngine;
 using Graphs;
 
 public class Delaunay3D {
+    /*
+     한글 주석 요약
+     이 파일은 3D 들로네(정확히는 3D 델로네-테트라덴레이션 유사)를 구현합니다.
+     알고리즘 개요:
+     1) 입력 정점 리스트를 받아 슈퍼 테트라헤드론(충분히 큰 4점)을 생성합니다.
+     2) 각 정점을 순차적으로 삽입하면서 그 점의 외접구(circumsphere)에 들어가는 테트라헤드론을 '나쁜' 것으로 표시합니다.
+     3) 나쁜 테트라헤드론들의 경계(삼각형)를 모아 새로운 테트라헤드론들을 구성합니다.
+     4) 슈퍼 테트라헤드론과 그에 포함된 요소를 제거하고 최종적으로 삼각형과 간선 목록을 추출합니다.
+
+     제공되는 주요 타입:
+     - Tetrahedron: 4개의 정점(A,B,C,D)과 외접구 계산을 포함합니다.
+     - Triangle: 테트라헤드론의 면을 표현합니다.
+     - Edge: 테트라헤드론의 간선 표현.
+
+     주의사항:
+     - 수치 안정성에 민감할 수 있으므로 동일 좌표 비교는 근사(AlmostEqual)로 처리합니다.
+     - 이 구현은 3D 좌표의 x,y,z 값만 사용합니다.
+    */
     public class Tetrahedron : IEquatable<Tetrahedron> {
         public Vertex A { get; set; }
         public Vertex B { get; set; }

@@ -10,6 +10,21 @@ using System.Linq;
 /// </summary>
 [ExecuteInEditMode]
 public class Generator2D : MonoBehaviour, ISerializationCallbackReceiver {
+    /*
+     추가 설명 (한글 주석)
+     이 클래스는 2D 그리드 기반의 절차적 던전 생성기를 구현합니다.
+     주요 단계:
+     1) 무작위로 방(Room)을 배치한다 (PlaceRooms)
+     2) 각 방의 중심을 정점으로 하여 들로네 삼각분할을 수행한다 (Triangulate)
+     3) 삼각분할에서 추출한 간선을 바탕으로 최소 신장 트리(MST)를 생성하고, 일부 간선을 추가하여 순환 경로를 만든다 (CreateHallways)
+     4) 선택된 간선들 각각에 대해 A* 기반의 경로탐색을 수행해 실제 통로(복도)를 만든다 (PathfindHallways)
+     5) 노드(분기점) 정보를 직렬화하고 방 속성을 설정해 시각화한다 (SetRoomProperties)
+
+     주의/설계 노트:
+     - 그리드는 Grid2D<CellType>로 관리되며, 각 셀은 Room/ Hallway/ None 중 하나로 표시된다.
+     - 복도 경로는 A*의 비용함수를 통해 기존 복도 우대, 방 통과 비용 등으로 제어된다.
+     - 노드(Node) 구조체는 경로 상의 분기점을 표현하며, 직렬화 가능한 형태로 저장된다.
+    */
     // 셀의 타입을 정의하는 열거형
     enum CellType {
         None,       // 빈 공간

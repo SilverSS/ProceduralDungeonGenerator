@@ -77,4 +77,12 @@ public class Grid3D<T> {
             data[GetIndex(pos)] = value;
         }
     }
+
+    /*
+     한글 주석 요약:
+     - Grid3D는 3차원 공간을 1차원 배열로 표현하는 유틸리티입니다.
+     - 내부적으로는 (x + width*y + width*height*z) 식으로 인덱스를 계산합니다.
+     - Offset은 외부 좌표계와 내부 인덱스의 오프셋을 맞추기 위해 사용됩니다.
+     - InBounds는 BoundsInt를 사용해 위치가 그리드 범위 내에 있는지 판단합니다.
+    */
 }

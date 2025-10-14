@@ -29,6 +29,22 @@ using UnityEngine;
 using Graphs;
 
 public class Delaunay2D {
+    /*
+     한글 주석 요약
+     이 파일은 들로네 삼각분할(Delaunay triangulation)을 구현합니다.
+     알고리즘은 보편적인 Bowyer–Watson 방식과 유사하며, 다음 단계를 따릅니다:
+     1) 외곽의 충분히 큰 슈퍼삼각형을 생성
+     2) 각 입력 정점을 순차적으로 삽입하면서 그 점을 포함하는 원의 반경에 들어가는 삼각형들을 '나쁜 삼각형'으로 표시
+     3) 나쁜 삼각형들의 경계를 따라 다각형을 만들고, 다각형의 간선들을 새 삼각형과 연결
+     4) 슈퍼삼각형에 포함된 모든 삼각형을 제거
+
+     제공되는 클래스들:
+     - Triangle : 삼각형을 표현 (정점 A,B,C와 보조 메서드 포함)
+     - Edge : 간선을 표현 (정점 U,V)
+     - Delaunay2D.Triangulate : 외부에서 정점 리스트를 받아 삼각분할 수행 후 결과(Edges, Triangles)를 반환
+
+     참고: 이 구현은 2D 평면(Vector2/Vector3의 x,y를 사용)에 국한됩니다.
+    */
     public class Triangle : IEquatable<Triangle> {
         public Vertex A { get; set; }
         public Vertex B { get; set; }

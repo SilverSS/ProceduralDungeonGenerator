@@ -11,6 +11,18 @@ using System.Linq;
 /// 필요한 경우 적절한 위치에 계단을 배치합니다.
 /// </summary>
 public class DungeonPathfinder3D {
+        /*
+         한글 주석 요약:
+         - 이 클래스는 3D A* 경로탐색을 확장하여 계단(stairs)을 다루는 로직을 포함합니다.
+         - 주요 함수:
+             - GetAvailableNeighbors: 현재 위치와 목표 위치의 높이 차이에 따라 이웃 후보를 반환(수평 이동, 계단용 이동 등)
+             - NeedsStairs: 특정 경로에서 계단이 필요한지 판정
+             - GetStairCells: 계단을 구성할 실제 셀 목록을 생성
+             - CalculatePathCost/CalculateHeuristic: 수평/수직 비용 가중치 적용
+         - 구현 노트:
+             - 수직 이동(층 간 이동)은 추가 비용을 부여하여 계단 사용을 유도/억제합니다.
+             - 이웃 정렬은 목표 방향(preferredDirection)에 대한 dot product로 우선순위를 부여합니다.
+        */
     /// <summary>
     /// 경로 탐색에 사용되는 노드 클래스
     /// 각 노드는 3D 공간의 한 지점을 나타내며, 경로 탐색에 필요한 모든 정보를 포함합니다.

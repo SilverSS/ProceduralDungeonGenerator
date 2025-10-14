@@ -11,6 +11,19 @@ using System.Linq;
 /// </summary>
 [ExecuteInEditMode]
 public class Generator3D : MonoBehaviour, ISerializationCallbackReceiver {
+    /*
+     한글 주석 요약:
+     이 클래스는 3차원(볼륨) 기반 절차적 던전 생성기를 구현합니다.
+     주요 파이프라인:
+     - 방 배치 (PlaceRooms)
+     - 3D 들로네 유사분할(Triangulate) 및 간선 선택(CreateHallways)
+     - A* 기반 3D 경로 탐색으로 복도/계단 생성(PathfindHallways, OrganizeStairs)
+     - 노드 직렬화 및 시각화
+
+     구현 노트:
+     - Grid3D<CellType>로 셀 상태를 관리합니다.
+     - 계단(Stairs) 처리를 통해 레벨 간 이동을 연결합니다.
+    */
     // 셀의 타입을 정의하는 열거형
     enum CellType {
         None,       // 빈 공간

@@ -11,6 +11,22 @@ public class DungeonPathfinder2D {
     /// <summary>
     /// 경로 탐색에 사용되는 노드 클래스
     /// </summary>
+    /*
+    한글 주석 요약
+    이 클래스는 A* 탐색을 기반으로 2D 그리드에서 경로를 찾는 유틸리티입니다.
+    - FindPath(start, end, costFunction): 시작점에서 도착점까지의 경로(벡터 리스트)를 반환
+    - costFunction: 각 이웃 노드에 대해 비용과 통과 가능 여부, 그리고 해당 셀이 방인지 복도인지 등의 추가 정보를 반환하는 콜백
+
+    내부구성:
+    - Node: 각 그리드 셀을 나타내며 이전 노드, 누적 비용, 휴리스틱 등을 보관
+    - PriorityQueue: 최소 우선순위 큐(힙)로서 노드와 우선순위(비용+휴리스틱)를 관리
++    
+    휴리스틱: 현재 구현은 맨해튼/유클리드 근사로 Vector2Int.Distance(유클리드 거리)를 사용합니다.
++
+    성능/정확성 노트:
+    - costFunction에서 반환되는 PathCost.traversable이 false면 해당 이웃은 무시됩니다.
++     - 방과 복도 사이의 전환에는 추가 비용을 주어 지나치게 잦은 전환을 억제합니다.
++    */
     public class Node {
         public Vector2Int Position { get; private set; }    // 노드의 2D 위치
         public Node Previous { get; set; }                  // 이전 노드 참조

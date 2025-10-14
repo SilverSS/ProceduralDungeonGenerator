@@ -9,6 +9,13 @@ public class Room3D {
     public Dictionary<Vector3Int, CellProperties> CellProperties { get; set; }
     public GameObject VisualizationObject { get; set; }
 
+        /*
+         한글 주석 요약:
+         - Room3D는 방의 위치와 크기(bounds), 각 셀의 CellProperties를 관리합니다.
+         - Intersect는 두 BoundsInt가 겹치는지(충돌) 여부를 판단합니다.
+         - VisualizationObject는 에디터/런타임 시 방을 시각화하는 GameObject를 참조합니다.
+        */
+
     // 방 생성자: 위치와 크기를 받아 방의 경계를 설정
     public Room3D(Vector3Int location, Vector3Int size, RoomType type = RoomType.Normal) {
         bounds = new BoundsInt(location, size);
