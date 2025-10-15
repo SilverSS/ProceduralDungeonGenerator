@@ -12,7 +12,6 @@
 - **RoomVisualizer** : 방의 타입/속성에 따라 Gizmo 및 시각화 오브젝트 표시
 - **CellProperties** : 각 셀의 외곽/입구/내부 여부 등 세부 정보 관리
 - **DungeonGenerationOptions** : 적/아이템/상인/보스 출현 확률 등 던전 생성 옵션
-- **Rotator** : 오브젝트를 Y축 기준으로 회전시키는 유틸리티
 
 ## 앞으로 추가 수정해야할 작업(TO-DO)
 
