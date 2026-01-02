@@ -147,31 +147,47 @@ public class DungeonPathfinder2D {
 
             // 방향성 있는 노드 검색 최적화
             Vector2 direction = (end - node.Position).ToVector2();
-            var sortedNeighbors = neighbors.OrderBy(n => 
-                Vector2.Dot(n.ToVector2(), direction.normalized)).ToList();
+            var sortedNeighbors = neighbors.OrderBy(n =>
+                -Vector2.Dot(n.ToVector2(), direction.normalized)).ToList();  // 내림차순으로 수정 (목표 방향 우선)
+
+            // 현재 진행 방향 계산 (이전 노드가 있는 경우)
+            Vector2Int currentDirection = node.Previous != null
+                ? node.Position - node.Previous.Position
+                : Vector2Int.zero;
 
             foreach (var offset in sortedNeighbors) {
                 Vector2Int nextPos = node.Position + offset;
-                
+
                 if (nextPos.x < 0 || nextPos.x >= size.x || nextPos.y < 0 || nextPos.y >= size.y) continue;
-                
+
                 Node neighbor = nodes[nextPos.x, nextPos.y];
                 if (closed.Contains(neighbor)) continue;
 
                 var pathCost = costFunction(node, neighbor);
-                
+
                 // 방과 복도의 겹침에 대한 추가 비용 계산
                 float additionalCost = 0f;
-                
+
                 // 방에서 복도로 이동하거나 복도에서 방으로 이동하는 경우
                 if ((pathCost.isRoom && node.IsCorridor) || (pathCost.isCorridor && node.IsRoom)) {
                     // 높은 추가 비용 부여 (기본 비용의 2배)
                     additionalCost = pathCost.cost * 2f;
                 }
-                
+
+                // 진행 방향 가중치: 방향 전환 시 80% 확률로 페널티 부여
+                // 80% 확률로 직진 선호, 20% 확률로 방향 전환 허용
+                float directionPenalty = 0f;
+                if (currentDirection != Vector2Int.zero && offset != currentDirection) {
+                    if (UnityEngine.Random.value < 0.8f) {
+                        // 80% 확률로 페널티 부여하여 직진 선호
+                        directionPenalty = pathCost.cost * 0.5f;
+                    }
+                    // 20% 확률로 페널티 없음 → 방향 전환 선택 가능
+                }
+
                 if (!pathCost.traversable) continue;
 
-                float newCost = node.Cost + pathCost.cost + additionalCost;
+                float newCost = node.Cost + pathCost.cost + additionalCost + directionPenalty;
                 
                 if (!queue.Contains(neighbor) || newCost < neighbor.Cost) {
                     neighbor.Cost = newCost;

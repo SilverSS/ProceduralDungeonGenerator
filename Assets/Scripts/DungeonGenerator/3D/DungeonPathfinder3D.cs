@@ -416,18 +416,30 @@ public class DungeonPathfinder3D {
                 return -dot;  // 내림차순 정렬
             }).ToList();
 
+            // 현재 진행 방향 계산 (이전 노드가 있는 경우, 수평 방향만)
+            Vector3Int currentDirection = Vector3Int.zero;
+            if (node.Previous != null) {
+                Vector3Int delta = node.Position - node.Previous.Position;
+                // 수평 방향만 추출 (y 제외)
+                currentDirection = new Vector3Int(
+                    Mathf.Clamp(delta.x, -1, 1),
+                    0,
+                    Mathf.Clamp(delta.z, -1, 1)
+                );
+            }
+
             // 각 이웃 노드 처리
             foreach (var offset in sortedNeighbors) {
                 Vector3Int nextPos = node.Position + offset;
-                
+
                 // 그리드 범위 검사
                 if (!grid.InBounds(nextPos)) continue;
-                
+
                 Node neighbor = grid[nextPos];
                 if (closed.Contains(neighbor)) continue;
 
                 // 이전에 방문한 위치나 계단 셀은 제외
-                if (node.PreviousSet.Contains(neighbor.Position) || 
+                if (node.PreviousSet.Contains(neighbor.Position) ||
                     node.StairCells.Contains(neighbor.Position)) {
                     continue;
                 }
@@ -440,24 +452,35 @@ public class DungeonPathfinder3D {
                 if (pathCost.isStairs) {
                     var stairCells = GetStairCells(node.Position, offset);
                     // 계단 셀 중 하나라도 이미 사용 중이면 이 경로는 사용 불가
-                    if (stairCells.Any(cell => node.PreviousSet.Contains(cell) || 
+                    if (stairCells.Any(cell => node.PreviousSet.Contains(cell) ||
                                              node.StairCells.Contains(cell))) {
                         continue;
                     }
                     neighbor.AddStairCells(stairCells);
                 }
-                
+
                 // 이동 비용 계산
                 float movementCost = CalculatePathCost(nextPos, end, pathCost.isStairs);
                 float additionalCost = 0f;
-                
+
                 // 방과 복도 간 전환에 대한 추가 비용
                 if ((pathCost.isRoom && node.IsCorridor) || (pathCost.isCorridor && node.IsRoom)) {
                     additionalCost = movementCost * 2f;
                 }
 
+                // 진행 방향 가중치: 방향 전환 시 80% 확률로 페널티 부여
+                // 80% 확률로 직진 선호, 20% 확률로 방향 전환 허용
+                float directionPenalty = 0f;
+                if (currentDirection != Vector3Int.zero && offset != currentDirection) {
+                    if (UnityEngine.Random.value < 0.8f) {
+                        // 80% 확률로 페널티 부여하여 직진 선호
+                        directionPenalty = pathCost.cost * 0.5f;
+                    }
+                    // 20% 확률로 페널티 없음 → 방향 전환 선택 가능
+                }
+
                 // 총 비용 계산
-                float newCost = node.Cost + movementCost + additionalCost;
+                float newCost = node.Cost + movementCost + additionalCost + directionPenalty;
                 
                 // 더 나은 경로를 찾은 경우 노드 정보 업데이트
                 if (!queue.Contains(neighbor) || newCost < neighbor.Cost) {
